@@ -1,12 +1,26 @@
-
-"""SQLite storage for the initial itemit baseline."""
-
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path("data/asset_sync.db")
+
+
+def ensure_deletion_columns(conn):
+    """Migrate an existing database without dropping or resetting any data.
+
+    Call inside a transaction when modifying existing data.
+    """
+    for table in ("items", "collections"):
+        columns = {
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        if "is_active" not in columns:
+            conn.execute(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+            )
 
 
 def save_initial_baseline(items, collections, current_locations):
@@ -32,7 +46,7 @@ def save_initial_baseline(items, collections, current_locations):
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
         conn.executescript("""
@@ -41,14 +55,16 @@ def save_initial_baseline(items, collections, current_locations):
                 name TEXT,
                 serial TEXT,
                 archived INTEGER,
-                raw_json TEXT NOT NULL
+                raw_json TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS collections (
                 id TEXT PRIMARY KEY,
                 name TEXT,
                 parent_id TEXT,
-                raw_json TEXT NOT NULL
+                raw_json TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS item_locations (
@@ -71,6 +87,9 @@ def save_initial_baseline(items, collections, current_locations):
                 detected_at TEXT NOT NULL
             );
         """)
+
+        # Also upgrades older baselines that predate is_active.
+        ensure_deletion_columns(conn)
 
         existing = conn.execute(
             "SELECT value FROM sync_metadata "
@@ -100,7 +119,6 @@ def save_initial_baseline(items, collections, current_locations):
 
             for collection in collections:
                 parent = collection.get("parent") or {}
-
                 conn.execute(
                     """
                     INSERT INTO collections
@@ -116,11 +134,9 @@ def save_initial_baseline(items, collections, current_locations):
                 )
 
             known_ids = set(item_ids)
-
             for item_id, location in current_locations.items():
                 if item_id not in known_ids:
                     continue
-
                 conn.execute(
                     """
                     INSERT INTO item_locations (item_id, location)
@@ -143,10 +159,6 @@ def save_initial_baseline(items, collections, current_locations):
     print("\nInitial baseline successfully created!")
     print("Items stored:", len(items))
     print("Collections stored:", len(collections))
-    print(
-        "Items with locations:",
-        len(set(current_locations) & set(item_ids))
-    )
+    print("Items with locations:", len(set(current_locations) & set(item_ids)))
     print("Change events: 0")
-
     return True
