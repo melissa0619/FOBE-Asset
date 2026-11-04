@@ -19,14 +19,14 @@ def test_simulated_changes(tmp_path):
         items = [
             json.loads(row[0])
             for row in conn.execute(
-                "SELECT raw_json FROM items"
+                "SELECT raw_json FROM items WHERE is_active = 1"
             )
         ]
 
         collections = [
             json.loads(row[0])
             for row in conn.execute(
-                "SELECT raw_json FROM collections"
+                "SELECT raw_json FROM collections WHERE is_active = 1"
             )
         ]
 

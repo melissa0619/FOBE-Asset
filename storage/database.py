@@ -7,6 +7,110 @@ from pathlib import Path
 DB_PATH = Path("data/asset_sync.db")
 
 
+def ensure_ifc_item_mapping_table(conn):
+    """Apply the additive IFC-to-itemit mapping migration.
+
+    ``items.id`` is the synchronized itemit UUID column. Synchronization never
+    calls this helper or writes this table, keeping mapping ownership separate.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ifc_item_mapping (
+            model_key TEXT NOT NULL,
+            ifc_global_id TEXT NOT NULL,
+            itemit_item_id TEXT NOT NULL,
+            mapping_status TEXT NOT NULL DEFAULT 'PROVISIONAL',
+            mapping_method TEXT NOT NULL DEFAULT 'MANUAL',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (model_key, ifc_global_id),
+            FOREIGN KEY (itemit_item_id) REFERENCES items(id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ifc_item_mapping_itemit_item_id "
+        "ON ifc_item_mapping(itemit_item_id)"
+    )
+
+
+def ensure_sync_run_table(conn):
+    """Create the audit trail for completed synchronizations."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sync_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status = 'SUCCESS'),
+            item_count INTEGER NOT NULL,
+            collection_count INTEGER NOT NULL,
+            location_count INTEGER NOT NULL,
+            change_count INTEGER NOT NULL
+        )
+        """
+    )
+
+
+def record_successful_sync(
+    started_at, item_count, collection_count, location_count, change_count,
+    db_path=DB_PATH,
+):
+    """Record a successful completed run after all snapshot writes commit."""
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        ensure_sync_run_table(conn)
+        conn.execute(
+            """
+            INSERT INTO sync_runs (
+                started_at, completed_at, status, item_count, collection_count,
+                location_count, change_count
+            ) VALUES (?, ?, 'SUCCESS', ?, ?, ?, ?)
+            """,
+            (
+                started_at,
+                datetime.now(timezone.utc).isoformat(),
+                item_count, collection_count, location_count, change_count,
+            ),
+        )
+
+
+def insert_successful_sync(
+    conn, started_at, item_count, collection_count, location_count, change_count
+):
+    """Insert a success record using the caller's active transaction."""
+    ensure_sync_run_table(conn)
+    conn.execute(
+        """
+        INSERT INTO sync_runs (
+            started_at, completed_at, status, item_count, collection_count,
+            location_count, change_count
+        ) VALUES (?, ?, 'SUCCESS', ?, ?, ?, ?)
+        """,
+        (
+            started_at,
+            datetime.now(timezone.utc).isoformat(),
+            item_count,
+            collection_count,
+            location_count,
+            change_count,
+        ),
+    )
+
+
+def last_successful_run(db_path=DB_PATH):
+    """Return the latest successful run, or ``None`` before initialization."""
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return None
+    with closing(sqlite3.connect(db_path)) as conn:
+        ensure_sync_run_table(conn)
+        return conn.execute(
+            "SELECT * FROM sync_runs WHERE status = 'SUCCESS' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+
 def ensure_deletion_columns(conn):
     """Migrate an existing database without dropping or resetting any data.
 
@@ -23,7 +127,7 @@ def ensure_deletion_columns(conn):
             )
 
 
-def save_initial_baseline(items, collections, current_locations):
+def save_initial_baseline(items, collections, current_locations, run_started_at=None):
     """Store the first snapshot without producing change events."""
 
     if not items or not collections:
@@ -87,6 +191,7 @@ def save_initial_baseline(items, collections, current_locations):
                 detected_at TEXT NOT NULL
             );
         """)
+        ensure_sync_run_table(conn)
 
         # Also upgrades older baselines that predate is_active.
         ensure_deletion_columns(conn)
@@ -155,6 +260,15 @@ def save_initial_baseline(items, collections, current_locations):
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
+            if run_started_at:
+                insert_successful_sync(
+                    conn,
+                    run_started_at,
+                    len(items),
+                    len(collections),
+                    len(current_locations),
+                    0,
+                )
 
     print("\nInitial baseline successfully created!")
     print("Items stored:", len(items))

@@ -38,6 +38,56 @@ class ItemitClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def get_item(self, item_id):
+        """Retrieve an item detail only when nested page data is incomplete."""
+        response = self.session.get(f"{self.base_url}/items/{item_id}", timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def _membership_state(item):
+        """Classify only explicit, internally consistent membership payloads."""
+        nested = item.get("collections") if isinstance(item, dict) else None
+        if not isinstance(nested, dict):
+            return "UNKNOWN", []
+        total, rows = nested.get("total"), nested.get("results")
+        if not isinstance(total, int) or total < 0 or not isinstance(rows, list):
+            return "INCOMPLETE", []
+        ids = [row.get("id") for row in rows if isinstance(row, dict) and row.get("id")]
+        if len(ids) != len(rows) or len(ids) != len(set(ids)) or total != len(ids):
+            return "INCOMPLETE", ids
+        return ("EMPTY" if total == 0 else "COMPLETE"), ids
+
+    def resolve_item_collection_memberships(self, items):
+        """Classify each item's Collection data without modifying raw API data.
+
+        Item detail is a fallback only; omitted fields remain UNKNOWN rather
+        than being mistaken for an explicitly empty membership list.
+        """
+        resolved = []
+        for item in items:
+            item_id = item.get("id") if isinstance(item, dict) else None
+            if not item_id:
+                raise RuntimeError("Item response has incomplete Collection data and no item UUID")
+            state, membership_ids = self._membership_state(item)
+            source, detail = "ITEM_PAGE", None
+            detail_error = None
+            if state in {"UNKNOWN", "INCOMPLETE"}:
+                try:
+                    detail = self.get_item(item_id)
+                    detail_state, detail_ids = self._membership_state(detail)
+                    if detail_state in {"COMPLETE", "EMPTY"}:
+                        state, membership_ids, source = detail_state, detail_ids, "ITEM_DETAIL"
+                    elif state == "UNKNOWN" and detail_state == "INCOMPLETE":
+                        state, membership_ids, source = "INCOMPLETE", detail_ids, "ITEM_DETAIL"
+                except Exception as error:  # membership enrichment cannot block inventory sync
+                    state, membership_ids, detail_error = "UNKNOWN", [], str(error)
+            resolved.append({"item_id": item_id, "status": state,
+                             "memberships": membership_ids, "source": source,
+                             "raw_item": item, "raw_detail": detail,
+                             "detail_error": detail_error})
+        return resolved
     
     def get_all_items(self):
         all_items = []
@@ -50,7 +100,11 @@ class ItemitClient:
             items = data.get("results", [])
             total = data.get("total")
 
+            if not isinstance(items, list):
+                raise ValueError("Invalid Items response")
             if not items:
+                if total is not None and len(all_items) < total:
+                    raise RuntimeError("Pagination stopped before all items were fetched")
                 break
 
             all_items.extend(items)
@@ -63,6 +117,8 @@ class ItemitClient:
             skip += len(items)
 
             if total is not None and len(all_items) >= total:
+                if len(all_items) != total:
+                    raise RuntimeError("Item pagination exceeded the reported total")
                 break
 
             if len(items) < limit:

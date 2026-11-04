@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import closing
 
-from storage.database import DB_PATH, ensure_deletion_columns
+from storage.database import (
+    DB_PATH,
+    ensure_deletion_columns,
+    insert_successful_sync,
+)
 
 
 def build_index(records, label):
@@ -81,6 +85,7 @@ def sync_snapshot(
     db_path=DB_PATH,
     confirmed_removed_item_ids=None,
     confirmed_removed_collection_ids=None,
+    run_started_at=None,
 ):
     """Atomically compare API snapshot and SQLite, preserving removed records.
 
@@ -351,5 +356,17 @@ def sync_snapshot(
                 conn.execute(
                     "DELETE FROM item_locations WHERE item_id = ?", (item_id,)
                 )
+
+        # This is deliberately inside the same transaction as the snapshot:
+        # a failed run can neither alter asset rows nor claim success.
+        if run_started_at:
+            insert_successful_sync(
+                conn,
+                run_started_at,
+                len(items),
+                len(collections),
+                len(current_locations),
+                len(events),
+            )
 
     return events
