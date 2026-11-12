@@ -41,9 +41,18 @@ def run_sync(started_at):
     items = client.get_all_items()
     collections = client.get_all_collections()
     usage_records = client.get_all_location_usage()
-    # Collection membership is an optional, conservative enrichment.  A
-    # missing field must not prevent authoritative inventory/location sync.
-    membership_records = client.resolve_item_collection_memberships(items)
+    # Collection membership is an optional, conservative enrichment. itemit
+    # exposes it through collection-profiles, not the normal item response.
+    # If this endpoint is unavailable or incomplete, preserve current links.
+    try:
+        collection_profiles = client.get_all_collection_profiles()
+        membership_records = client.resolve_collection_profile_memberships(
+            items, collections, collection_profiles
+        )
+    except Exception as error:  # Enrichment must never block inventory sync.
+        logging.warning("Collection-profile membership sync unavailable: %s", error)
+        membership_records = client.resolve_item_collection_memberships(items)
+    logging.info("itemit request metrics: %s", client.request_metrics())
 
     current_locations = {}
     for record in usage_records:
@@ -133,13 +142,14 @@ def run_sync(started_at):
 
 def print_collection_status(records):
     counts = {state: sum(row.get("status") == state for row in records)
-              for state in ("COMPLETE", "EMPTY", "INCOMPLETE", "UNKNOWN")}
+              for state in ("COMPLETE", "EMPTY", "PARTIAL", "INCOMPLETE", "UNKNOWN")}
     relationships = sum(len(row.get("memberships", [])) for row in records
-                        if row.get("status") in {"COMPLETE", "EMPTY"})
+                        if row.get("status") in {"COMPLETE", "EMPTY", "PARTIAL"})
     print("\n--- COLLECTION MEMBERSHIP STATUS ---")
     print("Total item records fetched:", len(records))
     print("Items with complete Collection information:", counts["COMPLETE"])
     print("Items explicitly having zero Collections:", counts["EMPTY"])
+    print("Items with partially observed Collection information:", counts["PARTIAL"])
     print("Items with incomplete information:", counts["INCOMPLETE"])
     print("Items with missing information:", counts["UNKNOWN"])
     print("Total validated Collection relationships:", relationships)
@@ -150,6 +160,7 @@ def print_collection_result(summary, mode):
     print("Proposed additions:", summary["added"])
     print("Proposed removals:", summary["removed"])
     print("Unchanged relationships:", summary["unchanged"])
+    print("Partially observed item UUIDs:", summary["partial_items"])
     print("Unresolved item UUIDs:", ", ".join(summary["unresolved_item_ids"]) or "none")
     print("PDF-derived relationships remain:", "yes" if summary["pdf_derived_remain"] else "no")
     if summary["unresolved"]:

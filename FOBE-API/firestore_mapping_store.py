@@ -20,6 +20,10 @@ class MappingAlreadyExists(RuntimeError):
     """Raised when a mapping already exists for a stable IFC identity."""
 
 
+class MappingConfirmed(RuntimeError):
+    """Raised when an immutable confirmed mapping is targeted for a write."""
+
+
 class MappingNotFound(RuntimeError):
     """Raised when no mapping exists for a stable IFC identity."""
 
@@ -80,10 +84,32 @@ class FirestoreMappingStore:
         return firestore.SERVER_TIMESTAMP
 
     def create(self, mapping: dict[str, Any]) -> dict[str, Any]:
+        """Create the sole confirmed mapping for an IFC identity atomically."""
+        from firebase_admin import firestore
+
         ref = self._doc(mapping["model_key"], mapping["ifc_global_id"])
-        data = {**mapping, "document_id": ref.id, "created_at": self._timestamps(), "updated_at": self._timestamps()}
+        data = {
+            **mapping,
+            "mapping_status": "CONFIRMED",
+            "document_id": ref.id,
+            "created_at": self._timestamps(),
+            "updated_at": self._timestamps(),
+        }
+
+        @firestore.transactional
+        def create_if_absent(transaction):
+            snapshot = transaction.get(ref)
+            if snapshot.exists:
+                existing = snapshot.to_dict() or {}
+                if existing.get("mapping_status") == "CONFIRMED":
+                    raise MappingConfirmed()
+                raise MappingAlreadyExists()
+            transaction.create(ref, data)
+
         try:
-            ref.create(data)
+            create_if_absent(self.client.transaction())
+        except (MappingAlreadyExists, MappingConfirmed):
+            raise
         except Exception as error:
             code = getattr(error, "code", None)
             code_value = code() if callable(code) else code
@@ -115,24 +141,46 @@ class FirestoreMappingStore:
             raise MappingStoreUnavailable("Firestore could not list mappings") from error
 
     def update(self, model_key: str, ifc_global_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        """Update legacy non-confirmed records without racing a confirmation."""
+        from firebase_admin import firestore
+
         ref = self._doc(model_key, ifc_global_id)
-        try:
-            if not ref.get().exists:
+
+        @firestore.transactional
+        def update_if_mutable(transaction):
+            snapshot = transaction.get(ref)
+            if not snapshot.exists:
                 raise MappingNotFound()
-            ref.update({**changes, "updated_at": self._timestamps()})
+            if (snapshot.to_dict() or {}).get("mapping_status") == "CONFIRMED":
+                raise MappingConfirmed()
+            transaction.update(ref, {**changes, "updated_at": self._timestamps()})
+
+        try:
+            update_if_mutable(self.client.transaction())
             return self.get(model_key, ifc_global_id)
-        except MappingNotFound:
+        except (MappingNotFound, MappingConfirmed):
             raise
         except Exception as error:
             raise MappingStoreUnavailable("Firestore could not update the mapping") from error
 
     def delete(self, model_key: str, ifc_global_id: str) -> None:
+        """Delete only legacy non-confirmed records; confirmed mappings are immutable."""
+        from firebase_admin import firestore
+
         ref = self._doc(model_key, ifc_global_id)
-        try:
-            if not ref.get().exists:
+
+        @firestore.transactional
+        def delete_if_mutable(transaction):
+            snapshot = transaction.get(ref)
+            if not snapshot.exists:
                 raise MappingNotFound()
-            ref.delete()
-        except MappingNotFound:
+            if (snapshot.to_dict() or {}).get("mapping_status") == "CONFIRMED":
+                raise MappingConfirmed()
+            transaction.delete(ref)
+
+        try:
+            delete_if_mutable(self.client.transaction())
+        except (MappingNotFound, MappingConfirmed):
             raise
         except Exception as error:
             raise MappingStoreUnavailable("Firestore could not delete the mapping") from error

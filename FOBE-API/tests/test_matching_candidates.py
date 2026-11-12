@@ -18,7 +18,10 @@ def candidate_database(tmp_path, monkeypatch, count=4):
             CREATE TABLE collections (id TEXT PRIMARY KEY, name TEXT, parent_id TEXT, raw_json TEXT, is_active INTEGER);
             CREATE TABLE item_collections (item_id TEXT, collection_id TEXT, source TEXT NOT NULL DEFAULT 'itemit_pdf_2026-10-18');
         """)
-        conn.executemany("INSERT INTO collections VALUES (?, ?, NULL, '{}', 1)", [("c1", "Furniture"), ("c2", "White Box")])
+        conn.executemany(
+            "INSERT INTO collections VALUES (?, ?, NULL, '{}', 1)",
+            [("c1", "Furniture"), ("c2", "White Box"), ("c3", "Empty Collection")],
+        )
         for number in range(count):
             item_id = f"item-{number:03d}"
             name = "Stick Chair" if number < 33 else f"Asset {number:03d}"
@@ -55,6 +58,16 @@ def test_assets_include_multiple_collections_and_pagination(tmp_path, monkeypatc
     assert len(last) == 20
     chair = api.get_asset("item-000")
     assert {entry["name"] for entry in chair["collection_memberships"]} == {"Furniture", "White Box"}
+
+
+def test_collections_include_empty_collections_and_support_lookup(tmp_path, monkeypatch):
+    candidate_database(tmp_path, monkeypatch, count=2)
+    collections = api.list_collections(limit=100, offset=0)
+    empty = next(collection for collection in collections if collection["id"] == "c3")
+    assert empty == {
+        "id": "c3", "name": "Empty Collection", "parent_id": None, "is_active": True,
+    }
+    assert api.get_collection("c3") == empty
 
 
 def test_candidate_filters_are_explicit_and_repeated_chairs_remain_available(tmp_path, monkeypatch):

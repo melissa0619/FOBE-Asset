@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-11-06T07:23:21.376Z",
+  "generator": "fobe-ifc-step-indexer-v1",
+  "models": [
+    {
+      "key": "building",
+      "name": "Building Overview",
+      "file": "building.index.json",
+      "sourceSha256": "f27cdedc9a6475c381e67c2b39d9ed32eaab19b21d136473851160be64b2cdbd",
+      "elementCount": 1356
+    },
+    {
+      "key": "foyer",
+      "name": "Foyer",
+      "file": "foyer.index.json",
+      "sourceSha256": "9e3f285cbb05f410dd4b01b4679402c6a52806abdb1b7ab542fd51d52652c9d1",
+      "elementCount": 431
+    },
+    {
+      "key": "black",
+      "name": "Black Room",
+      "file": "black.index.json",
+      "sourceSha256": "416a864567520ada77d1f96754fd008cda1b750432d67625cd995f55b141e307",
+      "elementCount": 536
+    },
+    {
+      "key": "white",
+      "name": "White Room",
+      "file": "white.index.json",
+      "sourceSha256": "3348f34ad40ea65cda2497a09ac127bc19deeda111b095e0950e8e56071c2292",
+      "elementCount": 523
+    },
+    {
+      "key": "research",
+      "name": "Research Room",
+      "file": "research.index.json",
+      "sourceSha256": "f9c925c2c0285ef4093258701cabb0a20736d6d98b1748d01566c6ebd153f906",
+      "elementCount": 142
+    }
+  ]
+}

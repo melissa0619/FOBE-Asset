@@ -1,0 +1,22 @@
+{
+  "name": "fobe-asset-mapping",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js",
+    "generate:ifc-index": "node scripts/generate-ifc-index.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@thatopen/components": "3.4.9",
+    "@thatopen/fragments": "3.4.8",
+    "three": "0.186.1",
+    "web-ifc": "0.0.77"
+  }
+}

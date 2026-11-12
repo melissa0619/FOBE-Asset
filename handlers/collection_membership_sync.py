@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 
 VERIFIED_STATUSES = {"COMPLETE", "EMPTY"}
+ADDITIVE_ONLY_STATUSES = {"PARTIAL"}
 
 
 def is_pdf_derived_source(source):
@@ -41,10 +42,12 @@ def reconcile(conn, membership_records, dry_run=True):
     """Reconcile only API-verified items, never interpreting unknown as empty."""
     records = _normalise(membership_records)
     verified = [record for record in records if record.get("status") in VERIFIED_STATUSES]
+    partial = [record for record in records if record.get("status") in ADDITIVE_ONLY_STATUSES]
     unresolved = sorted(record.get("item_id") for record in records
-                        if record.get("status") not in VERIFIED_STATUSES and record.get("item_id"))
+                        if record.get("status") not in VERIFIED_STATUSES | ADDITIVE_ONLY_STATUSES
+                        and record.get("item_id"))
     desired = {(record["item_id"], collection_id)
-               for record in verified for collection_id in record.get("memberships", [])}
+               for record in verified + partial for collection_id in record.get("memberships", [])}
     verified_items = {record.get("item_id") for record in verified}
 
     item_ids = {row[0] for row in conn.execute("SELECT id FROM items")}
@@ -71,6 +74,7 @@ def reconcile(conn, membership_records, dry_run=True):
     summary = {key: len(value) for key, value in changes.items()} | {
         "discovered": len(desired), "unresolved": len(unresolved),
         "unresolved_item_ids": unresolved, "verified_items": len(verified),
+        "partial_items": len(partial),
         "pdf_derived_remain": any(
             is_pdf_derived_source(source) and pair not in changes["removed"]
             and pair not in changes["unchanged"]

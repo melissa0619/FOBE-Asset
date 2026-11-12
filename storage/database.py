@@ -7,34 +7,6 @@ from pathlib import Path
 DB_PATH = Path("data/asset_sync.db")
 
 
-def ensure_ifc_item_mapping_table(conn):
-    """Apply the additive IFC-to-itemit mapping migration.
-
-    ``items.id`` is the synchronized itemit UUID column. Synchronization never
-    calls this helper or writes this table, keeping mapping ownership separate.
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ifc_item_mapping (
-            model_key TEXT NOT NULL,
-            ifc_global_id TEXT NOT NULL,
-            itemit_item_id TEXT NOT NULL,
-            mapping_status TEXT NOT NULL DEFAULT 'PROVISIONAL',
-            mapping_method TEXT NOT NULL DEFAULT 'MANUAL',
-            notes TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (model_key, ifc_global_id),
-            FOREIGN KEY (itemit_item_id) REFERENCES items(id)
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ifc_item_mapping_itemit_item_id "
-        "ON ifc_item_mapping(itemit_item_id)"
-    )
-
-
 def ensure_sync_run_table(conn):
     """Create the audit trail for completed synchronizations."""
     conn.execute(

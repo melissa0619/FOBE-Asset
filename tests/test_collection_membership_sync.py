@@ -33,6 +33,18 @@ def test_unknown_items_preserve_existing_pdf_memberships():
     assert conn.execute("SELECT source FROM item_collections").fetchone()[0] == "itemit_pdf_2026-10-18"
 
 
+def test_partial_memberships_only_add_observed_links_without_removing_existing_links():
+    conn = database()
+    reconcile(conn, [{"item_id": "i1", "status": "COMPLETE", "memberships": ["c1", "c2"]}], dry_run=False)
+    summary = reconcile(conn, [{"item_id": "i1", "status": "PARTIAL", "memberships": ["c1"]}], dry_run=False)
+    assert summary["added"] == 0
+    assert summary["removed"] == 0
+    assert summary["partial_items"] == 1
+    assert conn.execute("SELECT item_id, collection_id FROM item_collections ORDER BY collection_id").fetchall() == [
+        ("i1", "c1"), ("i1", "c2")
+    ]
+
+
 def test_new_collection_reference_is_validated():
     conn = database()
     with pytest.raises(ValueError):

@@ -12,7 +12,12 @@ from pathlib import Path
 API_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(API_DIR))
 
-from firestore_mapping_store import FirestoreMappingStore, MappingAlreadyExists, MappingNotFound
+from firestore_mapping_store import (
+    FirestoreMappingStore,
+    MappingAlreadyExists,
+    MappingConfirmed,
+    MappingNotFound,
+)
 
 
 def main():
@@ -52,7 +57,7 @@ def main():
             try:
                 store.create(record)
                 migrated += 1
-            except MappingAlreadyExists:
+            except (MappingAlreadyExists, MappingConfirmed):
                 skipped += 1
     print(f"Migrated: {migrated}; concurrent skips: {skipped}; existing conflicts: {conflicts}.")
     if conflicts:

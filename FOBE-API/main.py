@@ -6,6 +6,7 @@ import sqlite3
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -17,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from firestore_mapping_store import (
     FirestoreMappingStore,
     MappingAlreadyExists,
+    MappingConfirmed,
     MappingNotFound,
     MappingStoreUnavailable,
 )
@@ -36,14 +38,13 @@ class MappingCreate(BaseModel):
     model_key: str = Field(min_length=1, max_length=120)
     ifc_global_id: str = Field(min_length=1, max_length=255)
     itemit_item_id: str = Field(min_length=1, max_length=255)
-    mapping_status: str = Field(default="PROVISIONAL", min_length=1, max_length=40)
+    mapping_status: Literal["CONFIRMED"] = "CONFIRMED"
     mapping_method: str = Field(default="MANUAL", min_length=1, max_length=40)
     notes: str | None = Field(default=None, max_length=4000)
 
 
 class MappingUpdate(BaseModel):
     itemit_item_id: str | None = Field(default=None, min_length=1, max_length=255)
-    mapping_status: str | None = Field(default=None, min_length=1, max_length=40)
     mapping_method: str | None = Field(default=None, min_length=1, max_length=40)
     notes: str | None = Field(default=None, max_length=4000)
 
@@ -126,6 +127,11 @@ def mapping_actor() -> str:
 
 
 def mapping_error(error):
+    if isinstance(error, MappingConfirmed):
+        raise HTTPException(
+            status_code=409,
+            detail="This IFC element is already mapped and confirmed.",
+        ) from error
     if isinstance(error, MappingNotFound):
         raise HTTPException(status_code=404, detail="IFC mapping not found") from error
     if isinstance(error, MappingAlreadyExists):
@@ -143,6 +149,16 @@ def serialize_asset(row):
     # Kept for the existing BIM Studio collection filter.
     asset["collections"] = [membership["name"] for membership in asset["collection_memberships"]]
     return asset
+
+
+def serialize_collection(row):
+    """Expose a collection even when it has no item memberships."""
+    collection = json.loads(row["raw_json"] or "{}")
+    collection["id"] = row["id"]
+    collection["name"] = row["name"]
+    collection["parent_id"] = row["parent_id"]
+    collection["is_active"] = bool(row["is_active"])
+    return collection
 
 
 ASSET_SELECT = """
@@ -198,6 +214,36 @@ def get_asset(asset_id: str):
     return serialize_asset(row)
 
 
+@app.get("/collections")
+def list_collections(
+    active_only: bool = True,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List synchronized collections, including collections without assets."""
+    with database() as conn:
+        query = "SELECT id, name, parent_id, raw_json, is_active FROM collections"
+        params = []
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY name, id LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = conn.execute(query, params).fetchall()
+    return [serialize_collection(row) for row in rows]
+
+
+@app.get("/collections/{collection_id}")
+def get_collection(collection_id: str):
+    with database() as conn:
+        row = conn.execute(
+            "SELECT id, name, parent_id, raw_json, is_active FROM collections WHERE id = ?",
+            (collection_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return serialize_collection(row)
+
+
 @app.post("/matching/candidates")
 def retrieve_candidates(payload: CandidateRequest):
     """Return a paged, read-only inventory pool for a selected IFC element.
@@ -228,8 +274,12 @@ def create_mapping(payload: MappingCreate):
         payload.model_key, payload.ifc_global_id, payload.itemit_item_id
     )
     try:
-        return mapping_store().create({**payload.model_dump(), "authenticated_user": mapping_actor()})
-    except (MappingAlreadyExists, MappingStoreUnavailable) as error:
+        return mapping_store().create({
+            **payload.model_dump(exclude={"mapping_status"}),
+            "mapping_status": "CONFIRMED",
+            "authenticated_user": mapping_actor(),
+        })
+    except (MappingAlreadyExists, MappingConfirmed, MappingStoreUnavailable) as error:
         mapping_error(error)
 
 
@@ -261,7 +311,7 @@ def update_mapping(model_key: str, ifc_global_id: str, payload: MappingUpdate):
     changes["authenticated_user"] = mapping_actor()
     try:
         return mapping_store().update(model_key, ifc_global_id, changes)
-    except (MappingNotFound, MappingStoreUnavailable) as error:
+    except (MappingNotFound, MappingConfirmed, MappingStoreUnavailable) as error:
         mapping_error(error)
 
 
@@ -270,6 +320,6 @@ def delete_mapping(model_key: str, ifc_global_id: str):
     require_mapping_writes_enabled()
     try:
         mapping_store().delete(model_key, ifc_global_id)
-    except (MappingNotFound, MappingStoreUnavailable) as error:
+    except (MappingNotFound, MappingConfirmed, MappingStoreUnavailable) as error:
         mapping_error(error)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
