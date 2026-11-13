@@ -22,13 +22,9 @@ export default defineConfig({
         modelView: resolve(repositoryRoot, 'frontend', 'model-view.html')
       },
       output: {
-        entryFileNames: 'js/[name]-[hash].js',
-        chunkFileNames: 'js/[name]-[hash].js',
-        assetFileNames: asset => asset.name?.endsWith('.css')
-          ? 'css/[name]-[hash][extname]'
-          : /\.m?js$/.test(asset.name || '')
-            ? 'js/[name]-[hash][extname]'
-            : 'images/[name]-[hash][extname]'
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]'
       }
     }
   },

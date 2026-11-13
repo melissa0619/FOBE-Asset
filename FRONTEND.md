@@ -29,15 +29,15 @@ npm run dev
 
 Start FOBE-API separately on `127.0.0.1:8000`. Vite proxies `/api` locally. For a separately hosted build, set `VITE_FOBE_API_BASE_URL` and configure FastAPI CORS before deployment.
 
-Run `npm run build` to generate root `index.html`, `model-view.html`, `js/`,
-`css/`, `fragments/`, `ifc-index/`, `wasm/`, and `worker.mjs` for GitHub Pages.
+Run `npm run build` to generate root `index.html`, `model-view.html`, `assets/`,
+`fragments/`, `ifc-index/`, `wasm/`, and `worker.mjs` for GitHub Pages.
 
 ## GitHub Pages
 
 In GitHub **Settings → Pages**, set the source to **Deploy from a branch**,
 choose `main`, and select `/(root)`. Commit the generated root frontend
-files after each build. The site is served below `/FOBE-Assets/`: Asset
-Mapping is `/FOBE-Assets/` and Model View is `/FOBE-Assets/model-view.html`.
+files after each build. The site is served below `/FOBE-Asset/`: Asset
+Mapping is `/FOBE-Asset/` and Model View is `/FOBE-Asset/model-view.html`.
 
 GitHub Pages cannot reach the local FastAPI proxy. For a production mapping
 interface, set `VITE_FOBE_API_BASE_URL` to the public HTTPS URL of the

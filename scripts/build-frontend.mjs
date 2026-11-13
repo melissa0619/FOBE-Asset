@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const generatedPaths = [
-  'index.html', 'model-view.html', 'css', 'js', 'images', 'fragments',
+  'index.html', 'model-view.html', 'assets', 'css', 'js', 'images', 'fragments',
   'ifc-index', 'wasm', 'worker.mjs',
 ];
 const buildDirectory = resolve(root, '.frontend-build');
@@ -40,7 +40,7 @@ await run(process.execPath, [
   'build', '--config', resolve(root, 'vite.config.js'),
 ]);
 
-for (const path of ['index.html', 'model-view.html', 'css', 'js', 'images']) {
+for (const path of ['index.html', 'model-view.html', 'assets']) {
   await copyIfPresent(resolve(buildDirectory, path), resolve(root, path));
 }
 
