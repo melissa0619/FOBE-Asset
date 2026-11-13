@@ -1,5 +1,5 @@
 /** Build only the GitHub Pages output paths; never clear the repository root. */
-import { cp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, rm, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -50,6 +50,4 @@ for (const directory of ['fragments', 'ifc-index', 'wasm']) {
   });
 }
 await cp(resolve(root, 'public', 'worker.mjs'), resolve(root, 'worker.mjs'));
-await mkdir(resolve(root, 'images'), { recursive: true });
-await writeFile(resolve(root, 'images', '.gitkeep'), '');
 await rm(buildDirectory, { recursive: true, force: true });
