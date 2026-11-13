@@ -16,7 +16,7 @@ def candidate_database(tmp_path, monkeypatch, count=4):
             CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT, serial TEXT, archived INTEGER, raw_json TEXT NOT NULL, is_active INTEGER NOT NULL);
             CREATE TABLE item_locations (item_id TEXT PRIMARY KEY, location TEXT NOT NULL);
             CREATE TABLE collections (id TEXT PRIMARY KEY, name TEXT, parent_id TEXT, raw_json TEXT, is_active INTEGER);
-            CREATE TABLE item_collections (item_id TEXT, collection_id TEXT, source TEXT NOT NULL DEFAULT 'itemit_pdf_2026-10-18');
+            CREATE TABLE item_collections (item_id TEXT, collection_id TEXT, source TEXT NOT NULL DEFAULT 'itemit_api');
         """)
         conn.executemany(
             "INSERT INTO collections VALUES (?, ?, NULL, '{}', 1)",
@@ -28,9 +28,9 @@ def candidate_database(tmp_path, monkeypatch, count=4):
             raw = json.dumps({"id": item_id, "name": name, "serial": f"D108G/A{number:02d}"})
             conn.execute("INSERT INTO items VALUES (?, ?, ?, 0, ?, 1)", (item_id, name, f"D108G/A{number:02d}", raw))
             conn.execute("INSERT INTO item_locations VALUES (?, ?)", (item_id, "White Box (D108G)" if number < 33 else "Foyer"))
-            conn.execute("INSERT INTO item_collections VALUES (?, 'c1', 'itemit_pdf_2026-10-18')", (item_id,))
+            conn.execute("INSERT INTO item_collections VALUES (?, 'c1', 'itemit_api')", (item_id,))
             if number == 0:
-                conn.execute("INSERT INTO item_collections VALUES (?, 'c2', 'itemit_pdf_2026-10-18')", (item_id,))
+                conn.execute("INSERT INTO item_collections VALUES (?, 'c2', 'itemit_api')", (item_id,))
     monkeypatch.setattr(api, "DATABASE_PATH", path)
 
 

@@ -1,4 +1,2 @@
 requests
 python-dotenv
-PyMuPDF
-firebase-admin

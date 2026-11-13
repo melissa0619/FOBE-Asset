@@ -29,7 +29,7 @@ def build_structure(db_path=DEFAULT_DB, excluded_collection_ids=None, active_onl
         if missing:
             raise RuntimeError(
                 "Required table(s) missing: " + ", ".join(sorted(missing))
-                + ". Run the PDF importer with --apply first."
+                + ". Run a successful itemit synchronization first."
             )
 
         collection_columns = {

@@ -1,11 +1,14 @@
 import './style.css';
-import { createMapping, getAsset, getAssets, getCollections, getMappingStatus, getMappings } from './api.js';
+import { createMapping, deleteMapping, getAsset, getAssets, getCollections, getMappingStatus, getMappings, updateDisplayName } from './api.js';
 import { loadIfcIndexes, resolveMappingIdentity } from './ifc-index.js';
 import { makeSearchableSelect } from './searchable-select.js';
+import { createSubmissionGuard, submitMappingEntries } from './confirmation-workflow.js';
 
 const $ = id => document.getElementById(id);
-const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'assign', 'confirm', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data'].map(id => [id, $(id)]));
-const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto' };
+const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data'].map(id => [id, $(id)]));
+const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false };
+const runMappingSubmission = createSubmissionGuard();
+const runUnmapping = createSubmissionGuard();
 const PAGE_SIZE = 25;
 const modelPicker = makeSearchableSelect(els.model, { placeholder: 'Choose a model' });
 const scopePicker = makeSearchableSelect(els['ifc-scope'], { placeholder: 'Show elements' });
@@ -18,7 +21,8 @@ const locationKey = location => { const value = String(location || '').toLowerCa
 const text = value => typeof value === 'string' && value.trim() ? value.trim() : 'Not available';
 const identity = element => element?.identity?.globalId ? element.identity : null;
 const keyOf = element => { const id = identity(element); return id && `${id.modelKey}:${id.globalId}`; };
-const mappingFor = element => { const id = identity(element); return id && state.mappings.find(row => row.model_key === id.modelKey && row.ifc_global_id === id.globalId); };
+const isActiveMapping = mapping => mapping?.is_mapped === true || (mapping && !Object.hasOwn(mapping, 'is_mapped') && mapping.mapping_status === 'CONFIRMED');
+const mappingFor = element => { const id = identity(element); return id && state.mappings.find(row => row.model_key === id.modelKey && row.ifc_global_id === id.globalId && isActiveMapping(row)); };
 const isConfirmed = element => Boolean(mappingFor(element));
 
 function message(value = '', tone = '') { els.message.textContent = value; els.message.className = `message ${tone}`; }
@@ -29,10 +33,16 @@ function setRecord(node, title, lines) { node.innerHTML = `<span class="record-l
 function formatIndexedAt(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'timestamp unavailable' : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: false, timeZone: 'UTC', timeZoneName: 'short' }).format(date); }
 function refreshConfirm() {
   const active = state.mode === 'batch' ? state.batch.filter(row => row.asset && !isConfirmed(row.element)) : state.selectedIfc && state.selectedAsset && !isConfirmed(state.selectedIfc) ? [{ element: state.selectedIfc, asset: state.selectedAsset }] : [];
-  els.confirm.disabled = !state.apiAvailable || active.length === 0;
-  els.confirm.textContent = state.mode === 'batch' ? `Confirm batch (${active.length})` : 'Confirm mapping';
+  els.confirm.disabled = state.isSubmitting || state.isUnmapping || !state.apiAvailable || active.length === 0;
+  els.confirm.textContent = state.isSubmitting ? 'Confirming...' : state.mode === 'batch' ? `Confirm batch (${active.length})` : 'Confirm mapping';
+  els.confirm.setAttribute('aria-busy', String(state.isSubmitting));
   els.assign.hidden = state.mode !== 'batch';
   els.assign.disabled = state.mode !== 'batch' || !state.selectedAsset || !state.batch.some(entry => keyOf(entry.element) === keyOf(state.selectedIfc));
+  const mapped = state.selectedIfc && mappingFor(state.selectedIfc);
+  els.unmap.hidden = !mapped;
+  els.unmap.disabled = !mapped || state.isUnmapping || state.isSubmitting || !state.apiAvailable;
+  els.unmap.textContent = state.isUnmapping ? 'Unmapping...' : 'Unmap';
+  els.unmap.setAttribute('aria-busy', String(state.isUnmapping));
 }
 function renderIfcCard() {
   els['ifc-card'].hidden = !state.selectedIfc;
@@ -45,6 +55,15 @@ function renderAssetCard() {
   if (!state.selectedAsset) return;
   const asset = state.selectedAsset;
   setRecord(els['asset-card'], state.mode === 'batch' ? 'Active batch itemit asset' : 'Selected itemit asset', [text(asset.name), `Serial: ${text(asset.serial)}`, `Location: ${text(asset.current_location)}`, `UUID: ${asset.id}`]);
+}
+function renderDisplayName() {
+  const mapped = state.selectedIfc && mappingFor(state.selectedIfc); const visible = Boolean(mapped);
+  const view = document.getElementById('display-name-view'); const editor = document.getElementById('display-name-editor');
+  if (!view || !editor) return;
+  view.hidden = !visible || state.editingDisplayName; editor.hidden = !visible || !state.editingDisplayName;
+  if (!visible) return;
+  document.getElementById('display-name-value').textContent = text(mapped.display_name);
+  if (state.editingDisplayName) document.getElementById('display-name-input').value = mapped.display_name || '';
 }
 function elementsForCurrentModel() { return state.indexes.get(els.model.value)?.elements || []; }
 function eligibleIfc(element) {
@@ -110,14 +129,16 @@ function renderBatch() {
 }
 function render() {
   const single = state.mode === 'single'; const hasIfc = Boolean(state.selectedIfc); const hasAsset = Boolean(state.selectedAsset); const showPairPreview = single ? hasIfc || hasAsset : hasIfc && hasAsset;
+  const lockNotice = document.querySelector('.mapping-lock-notice');
+  if (lockNotice) lockNotice.textContent = mappingFor(state.selectedIfc) ? 'Unmap this confirmed relationship before choosing a replacement asset.' : '';
   els['single-review'].classList.toggle('batch-pair-preview', !single); els['single-review'].classList.toggle('single-sided-review', hasIfc !== hasAsset); els['single-review'].hidden = !showPairPreview; els['review-empty'].hidden = !single || hasIfc || hasAsset; els['review-guidance'].hidden = !single || !(hasIfc !== hasAsset); els['review-guidance'].textContent = hasIfc ? 'Now select an itemit asset to complete this pair.' : 'Now select an IFC element to complete this pair.';
   if (showPairPreview) { renderIfcCard(); renderAssetCard(); }
-  renderIfcList(); renderAssets(); renderBatch(); refreshConfirm();
+  renderIfcList(); renderAssets(); renderBatch(); renderDisplayName(); refreshConfirm();
 }
 async function selectIfc(rawElement) {
   const element = resolveMappingIdentity(rawElement, state.indexes);
   if (!element) { message('Building Overview is read-only unless this GlobalId resolves to exactly one room-model element. No mapping was selected.', 'error'); return; }
-  state.selectedIfc = element; state.selectedAsset = state.mode === 'batch' ? state.batch.find(entry => keyOf(entry.element) === keyOf(element))?.asset || null : null;
+  state.selectedIfc = element; state.selectedAsset = state.mode === 'batch' ? state.batch.find(entry => keyOf(entry.element) === keyOf(element))?.asset || null : null; state.editingDisplayName = false;
   try {
     const persisted = await getMappingStatus({ modelKey: identity(element).modelKey, globalId: identity(element).globalId });
     if (!mappingFor(element)) state.mappings.push(persisted);
@@ -146,14 +167,52 @@ function assignBatchAsset() {
   if (next) { state.selectedIfc = next.element; state.selectedAsset = null; }
   render();
 }
-async function confirm() {
-  const entries = state.mode === 'batch' ? state.batch.filter(entry => entry.asset && !isConfirmed(entry.element)) : [{ element: state.selectedIfc, asset: state.selectedAsset }];
-  if (!entries.length || !confirm(`Confirm ${entries.length} immutable mapping${entries.length === 1 ? '' : 's'}?`)) return;
-  els.confirm.disabled = true; const failures = [];
-  for (const entry of entries) { const id = identity(entry.element); try { await createMapping({ model_key: id.modelKey, ifc_global_id: id.globalId, itemit_item_id: entry.asset.id, mapping_status: 'CONFIRMED', mapping_method: 'MANUAL' }); } catch (error) { failures.push(error.message); } }
-  try { state.mappings = await getMappings(); state.apiAvailable = true; } catch (error) { state.apiAvailable = false; failures.push(error.message); }
-  if (state.mode === 'batch') state.batch = state.batch.filter(entry => !mappingFor(entry.element));
-  message(failures.length ? failures.join(' ') : `${entries.length} mapping${entries.length === 1 ? '' : 's'} confirmed and locked.`, failures.length ? 'error' : 'success'); render();
+async function confirmMappings() {
+  await runMappingSubmission(async () => {
+    if (state.isSubmitting) return;
+    const entries = state.mode === 'batch' ? state.batch.filter(entry => entry.asset && !isConfirmed(entry.element)) : [{ element: state.selectedIfc, asset: state.selectedAsset }];
+    if (!entries.length || entries.some(entry => !identity(entry.element) || !entry.asset || isConfirmed(entry.element))) { refreshConfirm(); return; }
+    state.isSubmitting = true; refreshConfirm(); const failures = []; let submitted = 0;
+    try {
+      const result = await submitMappingEntries(entries, async entry => {
+        const id = identity(entry.element);
+        await createMapping({ model_key: id.modelKey, ifc_global_id: id.globalId, itemit_item_id: entry.asset.id, mapping_status: 'CONFIRMED', mapping_method: 'MANUAL' });
+      });
+      submitted = result.submitted;
+      if (result.error) failures.push(result.error.message);
+      if (submitted) {
+        try { state.mappings = await getMappings(); state.apiAvailable = true; }
+        catch (error) { state.apiAvailable = false; failures.push(error.message); }
+      }
+      if (state.mode === 'batch') state.batch = state.batch.filter(entry => !mappingFor(entry.element));
+      message(failures.length ? failures.join(' ') : `${submitted} mapping${submitted === 1 ? '' : 's'} confirmed and locked.`, failures.length ? 'error' : 'success');
+    } catch (error) {
+      message(error.message || 'Unable to confirm mapping.', 'error');
+    } finally {
+      state.isSubmitting = false;
+      render();
+    }
+  });
+}
+async function unmapSelectedMapping() {
+  await runUnmapping(async () => {
+    const mapped = state.selectedIfc && mappingFor(state.selectedIfc);
+    if (!mapped || state.isUnmapping) return;
+    state.isUnmapping = true; render();
+    try {
+      await deleteMapping({ modelKey: mapped.model_key, globalId: mapped.ifc_global_id });
+      state.mappings = state.mappings.filter(row => row.model_key !== mapped.model_key || row.ifc_global_id !== mapped.ifc_global_id);
+      state.selectedAsset = null;
+      state.editingDisplayName = false;
+      await refreshData({ announce: false });
+      message('Mapping removed. Choose an itemit asset to create a new mapping.', 'success');
+    } catch (error) {
+      message(error.message || 'Unable to unmap this IFC element.', 'error');
+    } finally {
+      state.isUnmapping = false;
+      render();
+    }
+  });
 }
 function populateFilters() {
   const currentLocation = els.location.value; const currentCollection = els.collection.value;
@@ -202,5 +261,9 @@ els['previous'].addEventListener('click', () => { state.page -= 1; renderAssets(
 els['clear-ifc-filters'].addEventListener('click', () => { els['ifc-query'].value = ''; els['ifc-scope'].value = 'likely'; els['ifc-status'].value = ''; scopePicker.refresh(); ifcStatusPicker.refresh(); state.ifcPage = 0; els['clear-ifc-filters'].hidden = true; render(); });
 els['clear-asset-filters'].addEventListener('click', () => { els['asset-query'].value = ''; els.location.value = ''; els.collection.value = ''; els['asset-status'].value = ''; locationPicker.refresh(); collectionPicker.refresh(); assetStatusPicker.refresh(); state.locationFilterSource = 'user'; state.page = 0; render(); });
 els['refresh-data'].addEventListener('click', () => { void refreshData(); });
-els.confirm.addEventListener('click', confirm);
+els.confirm.addEventListener('click', confirmMappings);
+els.unmap.addEventListener('click', unmapSelectedMapping);
+document.getElementById('edit-display-name').addEventListener('click', () => { state.editingDisplayName = true; render(); document.getElementById('display-name-input').focus(); });
+document.getElementById('cancel-display-name').addEventListener('click', () => { state.editingDisplayName = false; render(); });
+document.getElementById('display-name-editor').addEventListener('submit', async event => { event.preventDefault(); const mapped = state.selectedIfc && mappingFor(state.selectedIfc); const input = document.getElementById('display-name-input'); const value = input.value.trim(); if (!mapped || !value) { message('Display name cannot be empty.', 'error'); return; } const save = document.getElementById('save-display-name'); save.disabled = true; save.textContent = 'Saving…'; try { const updated = await updateDisplayName({ model_key: mapped.model_key, ifc_global_id: mapped.ifc_global_id, display_name: value }); const index = state.mappings.findIndex(row => row.model_key === updated.model_key && row.ifc_global_id === updated.ifc_global_id); if (index >= 0) state.mappings[index] = updated; state.editingDisplayName = false; message('Display name saved.', 'success'); } catch (error) { message(error.message, 'error'); } finally { save.textContent = 'Save'; render(); } });
 void start();

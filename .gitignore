@@ -212,6 +212,7 @@ tempCodeRunnerFile.py
 *.db
 *.sqlite3
 data/
+input/
 
 # Ruff stuff:
 .ruff_cache/

@@ -1,4 +1,5 @@
 :root { color: #e8eff7; background: #081625; font-family: Inter, "Segoe UI", sans-serif; font-synthesis: none; }
+.actions .danger { border-color: #a96069; background: #6d2934; color: #ffe8eb; }.actions .danger::before { content: none; }
 * { box-sizing: border-box; } html, body { min-width: 320px; } body { margin: 0; } button, input, select { font: inherit; } button { cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .48; } .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .app-shell { max-width: 1640px; margin: auto; padding: 28px; } .masthead { display: flex; align-items: end; justify-content: space-between; gap: 18px; border-bottom: 1px solid #28415a; padding-bottom: 18px; }.header-metadata { min-width: 210px; text-align: right; }.metadata-label, .eyebrow, .panel-kicker, .record-label { display: block; margin: 0 0 5px; color: #79d7c4; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; } h1, h2 { margin: 0; } h1 { font-size: clamp(25px, 3vw, 40px); letter-spacing: -.04em; } h2 { font-size: 17px; } .index-state, .count { color: #b5cadb; font-size: 12px; } .index-state { margin: 0; }
 .message { min-height: 24px; margin: 13px 0; color: #b5cadb; font-size: 13px; }.message.error { color: #ffb6bc; }.message.success { color: #80e4c8; }
@@ -21,9 +22,11 @@ label { display: grid; gap: 6px; color: #c0d1df; font-size: 11px; font-weight: 6
 .single-review .record-card { min-height: 0; padding: 11px; }
 .single-review .record-card strong { font-size: 13px; }
 .pair-connector { display: grid; place-items: center; color: #79d7c4; font-size: 18px; font-weight: 700; }
+.display-name-view, .display-name-editor { display: grid; gap: 7px; padding: 10px; border: 1px solid #31516c; border-radius: 8px; background: #0d1e30; color: #d4e1eb; font-size: 11px; }.display-name-view[hidden], .display-name-editor[hidden] { display: none !important; }.display-name-view strong { color: #f1f7fc; overflow-wrap: anywhere; }.display-name-editor > div { display: flex; justify-content: flex-end; gap: 7px; }.display-name-editor button { border: 1px solid #3c877e; border-radius: 6px; background: #186155; color: #f2fffb; padding: 7px 10px; font-size: 11px; font-weight: 700; }.display-name-editor .secondary { border-color: #42617c; background: transparent; color: #cfe0ed; }
 .single-review.batch-pair-preview { padding: 9px; border: 1px solid #284b66; border-radius: 9px; background: #0c1c2c; }
 .single-review.batch-pair-preview .record-card { border-color: #31516c; background: #10263b; }
 .single-review.batch-pair-preview .record-label { color: #8ed5f4; }
+.mapping-lock-notice { margin: 0; color: #8faabc; font-size: 10px; line-height: 1.35; }
 .batch-queue { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 9px; border-top: 0; padding-top: 0; overflow: hidden; }
 .batch-queue[hidden] { display: none !important; }
 .queue-header { display: grid; gap: 5px; padding-bottom: 9px; border-bottom: 1px solid #2d4c66; }

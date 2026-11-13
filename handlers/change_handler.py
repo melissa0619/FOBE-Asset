@@ -311,7 +311,7 @@ def sync_snapshot(
                 ),
             )
 
-        # 3. Record confirmed removals. Keep rows, locations and PDF mappings.
+        # 3. Record confirmed removals. Keep historical rows and locations.
         for item_id in sorted(missing_items):
             add_event(
                 "ITEM_REMOVED", "ITEM", item_id,

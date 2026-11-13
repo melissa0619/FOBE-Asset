@@ -131,9 +131,9 @@ def create_legacy_db(db_path):
             (
                 "item-1",
                 "deleted-subcollection",
-                "pdf",
-                "SER-1",
-                "Path",
+                "itemit_api",
+                "",
+                "",
                 "2026-10-18",
             ),
         )

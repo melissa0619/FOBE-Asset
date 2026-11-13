@@ -9,20 +9,27 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from firestore_mapping_store import (
     FirestoreMappingStore,
     MappingAlreadyExists,
+    MappingAssetAssigned,
     MappingConfirmed,
     MappingNotFound,
     MappingStoreUnavailable,
 )
 from matching import filter_candidates, normalize_asset, normalize_ifc_element
+from display_name import default_display_name, resolved_display_name
+from ifc_index_store import IfcIndexError, IfcIndexStore
+from mapped_assets_service import MappedAssetsService
 
 DATABASE_PATH = Path(
     os.getenv(
@@ -32,6 +39,7 @@ DATABASE_PATH = Path(
 )
 app = FastAPI(title="FOBE API", version="0.1.0")
 MAPPING_STORE_FACTORY = FirestoreMappingStore
+IFC_INDEX_STORE = IfcIndexStore()
 
 
 class MappingCreate(BaseModel):
@@ -47,6 +55,12 @@ class MappingUpdate(BaseModel):
     itemit_item_id: str | None = Field(default=None, min_length=1, max_length=255)
     mapping_method: str | None = Field(default=None, min_length=1, max_length=40)
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class DisplayNameUpdate(BaseModel):
+    model_key: str = Field(min_length=1, max_length=120)
+    ifc_global_id: str = Field(min_length=1, max_length=255)
+    display_name: str = Field(min_length=1, max_length=300)
 
 
 class CandidateFilters(BaseModel):
@@ -92,19 +106,36 @@ def require_itemit_item(itemit_item_id):
         raise HTTPException(status_code=422, detail="itemit_item_id does not exist in local inventory")
 
 
-def require_item_available_in_model(model_key, ifc_global_id, itemit_item_id):
-    """Revalidate same-model assignment immediately before every mapping write."""
+def itemit_asset_name(itemit_item_id):
+    with database() as conn:
+        row = conn.execute("SELECT name, raw_json FROM items WHERE id = ?", (itemit_item_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=422, detail="itemit_item_id does not exist in local inventory")
+    return (json.loads(row["raw_json"]).get("name") or row["name"])
+
+
+def canonical_ifc_identity(model_key, ifc_global_id):
     try:
-        conflicts = [row for row in mapping_store().list(model_key=model_key)
-                     if row.get("itemit_item_id") == itemit_item_id
-                     and row.get("ifc_global_id") != ifc_global_id]
-    except MappingStoreUnavailable as error:
-        mapping_error(error)
-    if conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail="itemit_item_id is already mapped to another IFC GlobalId in this model",
-        )
+        canonical = IFC_INDEX_STORE.resolve_mapping_identity(model_key, ifc_global_id)
+    except IfcIndexError as error:
+        raise HTTPException(status_code=503, detail=f"IFC index is unavailable: {error}") from error
+    if not canonical:
+        raise HTTPException(status_code=422, detail="IFC element does not exist in the configured IFC index")
+    return canonical
+
+
+def enrich_display_name(mapping):
+    ifc_name = itemit_name = None
+    try:
+        index_row = IFC_INDEX_STORE.get(mapping["model_key"], mapping["ifc_global_id"])
+        ifc_name = index_row.get("ifc_name") if index_row else None
+    except IfcIndexError:
+        pass
+    try:
+        itemit_name = itemit_asset_name(mapping["itemit_item_id"])
+    except HTTPException:
+        pass
+    return {**mapping, "display_name": resolved_display_name(mapping, ifc_name, itemit_name)}
 
 
 def mapping_store():
@@ -127,6 +158,11 @@ def mapping_actor() -> str:
 
 
 def mapping_error(error):
+    if isinstance(error, MappingAssetAssigned):
+        raise HTTPException(
+            status_code=409,
+            detail="itemit_item_id is already mapped to another IFC GlobalId in this model",
+        ) from error
     if isinstance(error, MappingConfirmed):
         raise HTTPException(
             status_code=409,
@@ -186,6 +222,18 @@ def inventory_assets(active_only=True, limit=None, offset=0):
         return [serialize_asset(row) for row in conn.execute(query, params)]
 
 
+def mapped_assets_service():
+    return MappedAssetsService(mapping_store(), IFC_INDEX_STORE, inventory_assets)
+
+
+def mapped_assets_error(error):
+    if isinstance(error, MappingStoreUnavailable):
+        mapping_error(error)
+    if isinstance(error, IfcIndexError):
+        raise HTTPException(status_code=503, detail=f"IFC index is unavailable: {error}") from error
+    raise error
+
+
 @app.get("/health")
 def health():
     with database() as conn:
@@ -212,6 +260,27 @@ def get_asset(asset_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Asset not found")
     return serialize_asset(row)
+
+
+@app.get("/mapped-assets")
+def list_mapped_assets():
+    """Read-only unified confirmed mappings; protect this endpoint before public deployment."""
+    try:
+        return mapped_assets_service().records()
+    except (MappingStoreUnavailable, IfcIndexError) as error:
+        mapped_assets_error(error)
+
+
+@app.get("/mapped-assets.csv", response_class=PlainTextResponse)
+def export_mapped_assets_csv():
+    """Read-only CSV export of /mapped-assets; protect before public deployment."""
+    try:
+        return PlainTextResponse(
+            mapped_assets_service().csv(), media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=mapped-assets.csv"},
+        )
+    except (MappingStoreUnavailable, IfcIndexError) as error:
+        mapped_assets_error(error)
 
 
 @app.get("/collections")
@@ -270,23 +339,29 @@ def retrieve_candidates(payload: CandidateRequest):
 def create_mapping(payload: MappingCreate):
     require_mapping_writes_enabled()
     require_itemit_item(payload.itemit_item_id)
-    require_item_available_in_model(
-        payload.model_key, payload.ifc_global_id, payload.itemit_item_id
-    )
+    model_key, ifc_global_id = canonical_ifc_identity(payload.model_key, payload.ifc_global_id)
     try:
+        ifc = IFC_INDEX_STORE.get(model_key, ifc_global_id)
+        itemit_name = itemit_asset_name(payload.itemit_item_id)
         return mapping_store().create({
-            **payload.model_dump(exclude={"mapping_status"}),
+            **payload.model_dump(exclude={"mapping_status", "model_key", "ifc_global_id"}),
+            "model_key": model_key,
+            "ifc_global_id": ifc_global_id,
             "mapping_status": "CONFIRMED",
+            "ifc_name": ifc.get("ifc_name") if ifc else None,
+            "itemit_name": itemit_name,
+            "display_name": default_display_name(ifc.get("ifc_name") if ifc else None, itemit_name),
+            "display_name_source": "AUTO",
             "authenticated_user": mapping_actor(),
         })
-    except (MappingAlreadyExists, MappingConfirmed, MappingStoreUnavailable) as error:
+    except (MappingAlreadyExists, MappingAssetAssigned, MappingConfirmed, MappingStoreUnavailable) as error:
         mapping_error(error)
 
 
 @app.get("/mappings")
 def list_mappings(model_key: str | None = None, itemit_item_id: str | None = None):
     try:
-        return mapping_store().list(model_key=model_key, itemit_item_id=itemit_item_id)
+        return [enrich_display_name(row) for row in mapping_store().list(model_key=model_key, itemit_item_id=itemit_item_id)]
     except MappingStoreUnavailable as error:
         mapping_error(error)
 
@@ -294,8 +369,22 @@ def list_mappings(model_key: str | None = None, itemit_item_id: str | None = Non
 @app.get("/mappings/status")
 def get_mapping_status(model_key: str, ifc_global_id: str):
     try:
-        return mapping_store().get(model_key, ifc_global_id)
+        return enrich_display_name(mapping_store().get(model_key, ifc_global_id))
     except (MappingNotFound, MappingStoreUnavailable) as error:
+        mapping_error(error)
+
+
+@app.patch("/mappings/display-name")
+def update_mapping_display_name(payload: DisplayNameUpdate):
+    require_mapping_writes_enabled()
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name must not be blank")
+    try:
+        return enrich_display_name(mapping_store().update_display_name(
+            payload.model_key, payload.ifc_global_id, display_name
+        ))
+    except (MappingNotFound, MappingAlreadyExists, MappingStoreUnavailable) as error:
         mapping_error(error)
 
 
@@ -307,7 +396,6 @@ def update_mapping(model_key: str, ifc_global_id: str, payload: MappingUpdate):
         raise HTTPException(status_code=422, detail="At least one mapping field is required")
     if "itemit_item_id" in changes:
         require_itemit_item(changes["itemit_item_id"])
-        require_item_available_in_model(model_key, ifc_global_id, changes["itemit_item_id"])
     changes["authenticated_user"] = mapping_actor()
     try:
         return mapping_store().update(model_key, ifc_global_id, changes)
@@ -320,6 +408,6 @@ def delete_mapping(model_key: str, ifc_global_id: str):
     require_mapping_writes_enabled()
     try:
         mapping_store().delete(model_key, ifc_global_id)
-    except (MappingNotFound, MappingConfirmed, MappingStoreUnavailable) as error:
+    except (MappingNotFound, MappingStoreUnavailable) as error:
         mapping_error(error)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -6,11 +6,6 @@ VERIFIED_STATUSES = {"COMPLETE", "EMPTY"}
 ADDITIVE_ONLY_STATUSES = {"PARTIAL"}
 
 
-def is_pdf_derived_source(source):
-    """Recognize both historic and current PDF-import provenance labels."""
-    return isinstance(source, str) and (source == "pdf_import" or source.startswith("itemit_pdf_"))
-
-
 def ensure_table(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS item_collections (
         item_id TEXT NOT NULL REFERENCES items(id), collection_id TEXT NOT NULL REFERENCES collections(id),
@@ -75,11 +70,6 @@ def reconcile(conn, membership_records, dry_run=True):
         "discovered": len(desired), "unresolved": len(unresolved),
         "unresolved_item_ids": unresolved, "verified_items": len(verified),
         "partial_items": len(partial),
-        "pdf_derived_remain": any(
-            is_pdf_derived_source(source) and pair not in changes["removed"]
-            and pair not in changes["unchanged"]
-            for pair, source in existing_rows.items()
-        ),
     }
     if dry_run:
         return summary

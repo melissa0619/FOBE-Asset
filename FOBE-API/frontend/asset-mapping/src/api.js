@@ -21,3 +21,5 @@ export const getAsset = id => request(`/assets/${encodeURIComponent(id)}`);
 export const getMappings = () => request('/mappings');
 export const getMappingStatus = ({ modelKey, globalId }) => request(`/mappings/status?${new URLSearchParams({ model_key: modelKey, ifc_global_id: globalId })}`);
 export const createMapping = mapping => request('/mappings', { method: 'POST', body: mapping });
+export const deleteMapping = ({ modelKey, globalId }) => request(`/mappings/${encodeURIComponent(modelKey)}/${encodeURIComponent(globalId)}`, { method: 'DELETE' });
+export const updateDisplayName = mapping => request('/mappings/display-name', { method: 'PATCH', body: mapping });

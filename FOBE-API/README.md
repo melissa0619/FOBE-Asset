@@ -38,7 +38,7 @@ the configured SQLite database, and logs to `FOBE-API/logs/api-server.log`.
 | GET | `/mappings` | List mappings; optional `model_key`, `itemit_item_id` |
 | GET | `/mappings/status` | Get the current mapping for an IFC element |
 | PUT | `/mappings/{model_key}/{ifc_global_id}` | Legacy-record update; confirmed mappings are rejected |
-| DELETE | `/mappings/{model_key}/{ifc_global_id}` | Legacy-record delete; confirmed mappings are rejected |
+| DELETE | `/mappings/{model_key}/{ifc_global_id}` | Hard-delete a mapping, making the IFC element and asset available again |
 
 `GET /collections` queries the collection table directly, so an empty
 collection appears after synchronization. Use `active_only=false` to include
@@ -59,16 +59,17 @@ Each mapping document is identified by the complete `model_key` and
 uses a Firestore transaction: it reads that document and creates it only when
 absent. Concurrent requests cannot overwrite a confirmed mapping.
 
-Confirmed mappings are immutable. A duplicate create, update, remap, or delete
-attempt returns HTTP `409` with this detail:
+Confirmed mappings cannot be overwritten or remapped in place. A duplicate
+create or identity-changing update returns HTTP `409` with this detail:
 
 ```text
 This IFC element is already mapped and confirmed.
 ```
 
-There is no confirmed-mapping correction, unlink, delete, provisional, or
-remapping workflow. Mapping reads return the stored `itemit_item_id` and
-`mapping_status`.
+Use `DELETE /mappings/{model_key}/{ifc_global_id}` to unmap. It hard-deletes
+only the Firestore relationship; it does not change the IFC index or itemit
+inventory. A new confirmed mapping can then be created for the same IFC
+identity. Mapping reads return the stored `itemit_item_id` and `mapping_status`.
 
 Example create request:
 

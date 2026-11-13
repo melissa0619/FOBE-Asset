@@ -16,8 +16,9 @@ itemit -> synchronizer -> data/asset_sync.db -> FOBE API -> Firestore mappings
   does not fetch itemit inventory while serving a request.
 - Firestore collection `ifc_item_mappings` is authoritative for IFC-to-itemit
   mappings. Mapping writes never fall back to SQLite.
-- New mappings are always `CONFIRMED` and are immutable: they cannot be
-  remapped or deleted through the API.
+- New mappings are always `CONFIRMED`. Unmapping hard-deletes only the
+  Firestore relationship, allowing the IFC element and itemit asset to be
+  mapped again without changing either source record.
 
 ## Repository layout
 
@@ -27,7 +28,6 @@ FOBE-Asset/
 |- api/itemit_client.py       Authenticated, paginated itemit client
 |- storage/                   SQLite schema and synchronization lock
 |- handlers/                  Snapshot change and membership handling
-|- importers/pdf_importer.py  Optional historical PDF membership importer
 |- FOBE-API/                  FastAPI inventory and Firestore mapping service
 |- scripts/run_sync.cmd       Windows Task Scheduler sync launcher
 `- tests/                     Synchronizer and API tests
@@ -122,13 +122,6 @@ using it beyond the host, add HTTPS, authentication, authorization, managed
 secrets, monitoring, and an explicit firewall policy.
 
 ## Optional utilities
-
-Preview or import historical PDF collection memberships:
-
-```powershell
-.\.venv\Scripts\python.exe -m importers.pdf_importer --pdf input\itemit_report.pdf --db data\asset_sync.db
-.\.venv\Scripts\python.exe -m importers.pdf_importer --pdf input\itemit_report.pdf --db data\asset_sync.db --apply
-```
 
 Export the SQLite collection hierarchy:
 

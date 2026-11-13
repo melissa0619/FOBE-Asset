@@ -23,14 +23,12 @@ def test_dry_run_and_idempotent_apply():
     assert reconcile(conn, records(), dry_run=False)["added"] == 0
 
 
-def test_unknown_items_preserve_existing_pdf_memberships():
+def test_unknown_items_preserve_existing_memberships():
     conn = database()
     reconcile(conn, [{"item_id": "i3", "status": "COMPLETE", "memberships": ["c1"]}], dry_run=False)
-    conn.execute("UPDATE item_collections SET source = 'itemit_pdf_2026-10-18'")
     summary = reconcile(conn, [{"item_id": "i3", "status": "UNKNOWN", "memberships": []}], dry_run=False)
     assert summary["removed"] == 0
-    assert summary["pdf_derived_remain"] is True
-    assert conn.execute("SELECT source FROM item_collections").fetchone()[0] == "itemit_pdf_2026-10-18"
+    assert conn.execute("SELECT source FROM item_collections").fetchone()[0] == "itemit_api"
 
 
 def test_partial_memberships_only_add_observed_links_without_removing_existing_links():

@@ -162,7 +162,6 @@ def print_collection_result(summary, mode):
     print("Unchanged relationships:", summary["unchanged"])
     print("Partially observed item UUIDs:", summary["partial_items"])
     print("Unresolved item UUIDs:", ", ".join(summary["unresolved_item_ids"]) or "none")
-    print("PDF-derived relationships remain:", "yes" if summary["pdf_derived_remain"] else "no")
     if summary["unresolved"]:
         print("Collection reconciliation remains partial; unresolved memberships were preserved.")
     else:
