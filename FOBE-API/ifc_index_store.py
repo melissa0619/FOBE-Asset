@@ -11,7 +11,7 @@ from typing import Any
 
 INDEX_SCHEMA_VERSION = "1.0"
 _INDEX_FILE = re.compile(r"^[A-Za-z0-9_-]+\.index\.json$")
-_DEFAULT_DIRECTORY = Path(__file__).resolve().parent / "frontend" / "asset-mapping" / "public" / "ifc-index"
+_DEFAULT_DIRECTORY = Path(__file__).resolve().parent.parent / "public" / "ifc-index"
 
 
 class IfcIndexError(RuntimeError):

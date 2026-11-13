@@ -7,7 +7,7 @@ Standalone Vite frontend for manual, immutable IFC-to-itemit mapping. It has no 
 The UI requires generated JSON indexes in `public/ifc-index/`. Generate them only from the controlled source IFC files:
 
 ```powershell
-cd .\FOBE-API\frontend\asset-mapping
+cd .
 $env:IFC_SOURCE_DIR = 'C:\path\to\IFC_Viewer_Weixuan\public\models'
 npm run generate:ifc-index
 ```

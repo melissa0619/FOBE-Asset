@@ -214,6 +214,10 @@ tempCodeRunnerFile.py
 data/
 input/
 
+# Frontend dependencies and build output
+node_modules/
+dist/
+
 # Ruff stuff:
 .ruff_cache/
 

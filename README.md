@@ -36,6 +36,22 @@ FOBE-Asset/
 Runtime state (`.env`, `.venv`, databases, logs, Firebase credentials, and
 exports in `data/`) is ignored by Git. Do not commit secrets or working data.
 
+## Frontend deployment
+
+The Vite frontend now lives at the repository root. Build it for static hosting
+with:
+
+```powershell
+npm ci
+$env:VITE_FOBE_API_BASE_URL = 'https://your-api.example.com'
+npm run build
+```
+
+Publish the generated `dist/` directory with GitHub Pages or another static
+host. GitHub Pages cannot proxy the local API, so `VITE_FOBE_API_BASE_URL` must
+point to a separately deployed FOBE API with appropriate CORS enabled.
+See [FRONTEND.md](FRONTEND.md) for IFC-index generation details.
+
 ## Setup
 
 Use PowerShell from `FOBE-Asset` with Python 3.10 or later:
