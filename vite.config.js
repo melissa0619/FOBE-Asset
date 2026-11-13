@@ -6,7 +6,7 @@ const apiTarget = process.env.FOBE_API_TARGET || 'http://127.0.0.1:8000';
 const repositoryRoot = import.meta.dirname;
 
 export default defineConfig({
-  base: '/FOBE-Assets/',
+  base: '/FOBE-Asset/',
   root: resolve(repositoryRoot, 'frontend'),
   // Shared static inputs stay at repository root so FastAPI can keep reading
   // public/ifc-index. The controlled build script copies them to the site root.
