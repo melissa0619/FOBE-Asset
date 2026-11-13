@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>FOBE Asset Mapping</title><style>.app-nav{display:flex;gap:6px;margin-left:auto}.app-nav a,.app-nav button{padding:7px 10px;border:1px solid #38546e;border-radius:7px;color:#b9cfdf;background:transparent;text-decoration:none;font-size:11px}.app-nav a.active{border-color:#79d7c4;background:#153c4b;color:#effffc}.app-nav button:hover:not(:disabled){border-color:#79d7c4;color:#effffc}.app-nav button[aria-busy="true"]{opacity:.7}@media(max-width:660px){.app-nav{margin:12px 0 0}}</style></head>
+  <body>
+    <main class="app-shell">
+      <header class="masthead">
+        <div><p class="eyebrow">FOBE / Asset registry</p><h1>Asset Mapping</h1></div><nav class="app-nav" aria-label="Application pages"><a href="./model-view.html">Model view</a><a class="active" href="./">Asset mapping</a><button id="refresh-data" type="button" title="Refresh itemit inventory, collections, and mappings">Refresh data</button></nav>
+        <div class="header-metadata"><span class="metadata-label">Model index</span><p id="index-state" class="index-state" aria-live="polite">Loading IFC index…</p></div>
+      </header>
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+      <section class="mapping-grid" aria-label="Asset mapping workspace">
+        <section class="panel ifc-panel">
+          <div class="panel-heading"><div><p class="panel-kicker">Source</p><h2>IFC elements</h2></div><span id="ifc-count" class="count"></span></div>
+          <div class="panel-toolbar"><label class="sr-only" for="ifc-query">Search IFC elements</label><input id="ifc-query" class="toolbar-search" type="search" placeholder="Search IFC elements..." /><button id="ifc-filter-toggle" class="filter-toggle" type="button" aria-expanded="false" aria-controls="ifc-filter-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4" /></svg> Filters</button></div>
+          <section id="ifc-filter-panel" class="filter-panel" hidden><label>Model <select id="model"></select></label><div class="inline-fields"><label>Show <select id="ifc-scope"><option value="likely">Likely assets</option><option value="review">Include review</option><option value="all">All indexed elements</option></select></label><label>State <select id="ifc-status"><option value="">All states</option><option value="UNMAPPED">Not mapped</option><option value="CONFIRMED">Confirmed</option></select></label></div><button id="clear-ifc-filters" class="text-button" type="button" hidden>Clear IFC filters</button></section>
+          <div class="mode-switch" role="group" aria-label="Mapping mode"><button id="single-mode" class="active" type="button">Single</button><button id="batch-mode" type="button">Batch</button></div><label id="select-visible-label" class="check-line" hidden><input id="select-visible" type="checkbox" /> Select all visible eligible elements</label>
+          <div id="ifc-list" class="list ifc-list"></div><div class="pagination"><button id="ifc-previous" class="secondary" type="button">Previous</button><span id="ifc-page">Page 1 of 1</span><button id="ifc-next" class="secondary" type="button">Next</button></div>
+        </section>
+        <section class="panel review-panel">
+          <div class="panel-heading"><div><p class="panel-kicker">Pair</p><h2>Mapping review</h2></div><span id="mode-label" class="count">Single</span></div>
+          <div id="review-empty" class="review-empty"><span aria-hidden="true">↔</span><p>Select an IFC element and an itemit asset to create a mapping.</p></div>
+          <div id="single-review" class="single-review"><div id="ifc-card" class="record-card" hidden></div><span class="pair-connector" aria-hidden="true">↔</span><div id="asset-card" class="record-card" hidden></div></div><p id="review-guidance" class="review-guidance" hidden></p><p class="mapping-lock-notice">Confirmed mappings cannot be changed.</p><div id="display-name-view" class="display-name-view" hidden><span class="record-label">Display name</span><strong id="display-name-value"></strong><button id="edit-display-name" class="text-button" type="button">Edit display name</button></div><form id="display-name-editor" class="display-name-editor" hidden><label for="display-name-input">Display name<input id="display-name-input" maxlength="300" required /></label><div><button id="save-display-name" type="submit">Save</button><button id="cancel-display-name" class="secondary" type="button">Cancel</button></div></form>
+          <section id="batch-queue" class="batch-queue" hidden></section>
+<div class="actions"><button id="assign" class="secondary" type="button" hidden>Assign &amp; next</button><button id="confirm" type="button" disabled>Confirm</button><button id="unmap" class="danger" type="button" hidden>Unmap</button><button id="clear-batch" class="secondary" type="button" hidden>Clear</button></div>
+        </section>
+        <section class="panel asset-panel">
+          <div class="panel-heading"><div><p class="panel-kicker">Target</p><h2>itemit assets</h2></div><span id="asset-count" class="count"></span></div>
+          <div class="panel-toolbar"><label class="sr-only" for="asset-query">Search itemit assets</label><input id="asset-query" class="toolbar-search" type="search" placeholder="Search itemit assets..." /><button id="asset-filter-toggle" class="filter-toggle" type="button" aria-expanded="false" aria-controls="asset-filter-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4" /></svg> Filters</button></div>
+          <section id="asset-filter-panel" class="filter-panel" hidden><div class="inline-fields"><label>Location <select id="location"><option value="">All locations</option></select></label><label>Collection <select id="collection"><option value="">All collections</option><option value="UNKNOWN">Unknown</option></select></label></div><label>Mapping state <select id="asset-status"><option value="">All states</option><option value="UNMAPPED">Not mapped</option><option value="CONFIRMED">Confirmed</option></select></label><button id="clear-asset-filters" class="text-button" type="button" hidden>Clear asset filters</button></section><div id="active-filters" class="active-filters"></div>
+          <div id="asset-list" class="list asset-list"></div><div class="pagination"><button id="previous" class="secondary" type="button">Previous</button><span id="page">Page 1 of 1</span><button id="next" class="secondary" type="button">Next</button></div>
+        </section>
+      </section>
+    </main><script type="module" src="/src/main.js"></script>
+  </body>
+</html>

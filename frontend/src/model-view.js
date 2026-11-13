@@ -33,7 +33,7 @@ async function ensureModel(entry) {
   if (state.models.has(entry.key)) return state.models.get(entry.key);
   if (state.loads.has(entry.key)) return state.loads.get(entry.key);
   const task = (async () => {
-    const model = await state.viewer.fragments.core.load(await bytes(`/fragments/${entry.frag}`), { modelId: entry.key });
+    const model = await state.viewer.fragments.core.load(await bytes(`${import.meta.env.BASE_URL}fragments/${entry.frag}`), { modelId: entry.key });
     state.models.set(entry.key, model); await buildLookup(model, entry.key); return model;
   })();
   state.loads.set(entry.key, task); try { return await task; } finally { state.loads.delete(entry.key); }

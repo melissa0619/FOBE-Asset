@@ -1,10 +1,14 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>FOBE Asset Mapping</title><style>.app-nav{display:flex;gap:6px;margin-left:auto}.app-nav a,.app-nav button{padding:7px 10px;border:1px solid #38546e;border-radius:7px;color:#b9cfdf;background:transparent;text-decoration:none;font-size:11px}.app-nav a.active{border-color:#79d7c4;background:#153c4b;color:#effffc}.app-nav button:hover:not(:disabled){border-color:#79d7c4;color:#effffc}.app-nav button[aria-busy="true"]{opacity:.7}@media(max-width:660px){.app-nav{margin:12px 0 0}}</style></head>
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>FOBE Asset Mapping</title><style>.app-nav{gap:6px;margin-left:auto;display:flex}.app-nav a,.app-nav button{color:#b9cfdf;background:0 0;border:1px solid #38546e;border-radius:7px;padding:7px 10px;font-size:11px;text-decoration:none}.app-nav a.active{color:#effffc;background:#153c4b;border-color:#79d7c4}.app-nav button:hover:not(:disabled){color:#effffc;border-color:#79d7c4}.app-nav button[aria-busy=true]{opacity:.7}@media (width<=660px){.app-nav{margin:12px 0 0}}</style>  <script type="module" crossorigin src="/FOBE-Assets/js/mapping-D-y1DJc0.js"></script>
+  <link rel="modulepreload" crossorigin href="/FOBE-Assets/js/searchable-select-BQJtQ5_f.js">
+  <link rel="stylesheet" crossorigin href="/FOBE-Assets/css/searchable-select-MK3zU0NZ.css">
+  <link rel="stylesheet" crossorigin href="/FOBE-Assets/css/mapping-K5b6YzA9.css">
+</head>
   <body>
     <main class="app-shell">
       <header class="masthead">
-        <div><p class="eyebrow">FOBE / Asset registry</p><h1>Asset Mapping</h1></div><nav class="app-nav" aria-label="Application pages"><a href="/model-view.html">Model view</a><a class="active" href="/">Asset mapping</a><button id="refresh-data" type="button" title="Refresh itemit inventory, collections, and mappings">Refresh data</button></nav>
+        <div><p class="eyebrow">FOBE / Asset registry</p><h1>Asset Mapping</h1></div><nav class="app-nav" aria-label="Application pages"><a href="./model-view.html">Model view</a><a class="active" href="./">Asset mapping</a><button id="refresh-data" type="button" title="Refresh itemit inventory, collections, and mappings">Refresh data</button></nav>
         <div class="header-metadata"><span class="metadata-label">Model index</span><p id="index-state" class="index-state" aria-live="polite">Loading IFC index…</p></div>
       </header>
       <p id="message" class="message" role="status" aria-live="polite"></p>
@@ -30,6 +34,6 @@
           <div id="asset-list" class="list asset-list"></div><div class="pagination"><button id="previous" class="secondary" type="button">Previous</button><span id="page">Page 1 of 1</span><button id="next" class="secondary" type="button">Next</button></div>
         </section>
       </section>
-    </main><script type="module" src="/src/main.js"></script>
+    </main>
   </body>
 </html>

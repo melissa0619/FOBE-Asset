@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "vite --config vite.config.js",
+    "build": "node scripts/build-frontend.mjs",
     "preview": "vite preview",
-    "test": "node --test test/*.test.js",
+    "test": "node --test frontend/test/*.test.js",
     "generate:ifc-index": "node scripts/generate-ifc-index.mjs"
   },
   "devDependencies": {

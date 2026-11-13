@@ -38,8 +38,8 @@ exports in `data/`) is ignored by Git. Do not commit secrets or working data.
 
 ## Frontend deployment
 
-The Vite frontend now lives at the repository root. Build it for static hosting
-with:
+The Vite source lives in `frontend/`; `npm run build` generates the GitHub
+Pages site at the repository root. Build it with:
 
 ```powershell
 npm ci
@@ -47,9 +47,12 @@ $env:VITE_FOBE_API_BASE_URL = 'https://your-api.example.com'
 npm run build
 ```
 
-Publish the generated `dist/` directory with GitHub Pages or another static
-host. GitHub Pages cannot proxy the local API, so `VITE_FOBE_API_BASE_URL` must
-point to a separately deployed FOBE API with appropriate CORS enabled.
+For GitHub Pages configured as `main → / (root)`, publish the generated root
+`index.html`, `model-view.html`, `js/`, `css/`, `fragments/`, `ifc-index/`,
+`wasm/`, and `worker.mjs`. The controlled build only replaces those generated
+paths; it never clears the repository root. GitHub Pages cannot proxy the
+local API, so `VITE_FOBE_API_BASE_URL` must point to a separately deployed FOBE
+API with appropriate CORS enabled.
 See [FRONTEND.md](FRONTEND.md) for IFC-index generation details.
 
 ## Setup
