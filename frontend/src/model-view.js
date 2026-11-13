@@ -111,12 +111,32 @@ function populateFilters() {
   for (const collection of state.collections) { $('mapping-collection').add(new Option(collection.name, collection.id)); $('asset-collection').add(new Option(collection.name, collection.id)); }
   mappingCollectionPicker.refresh(); assetCollectionPicker.refresh();
 }
+async function loadMappingData() {
+  try {
+    [state.assets, state.collections, state.mappings] = await Promise.all([getAssets(), getCollections(), getMappings()]);
+    populateFilters(); renderAssets(); renderMappings();
+  } catch (error) {
+    // The 3D models are static GitHub Pages assets. Mapping data is optional
+    // because the production site has no local FastAPI proxy.
+    console.warn('Mapping data is unavailable.', error);
+    renderAssets(); renderMappings();
+    status($('model-status').textContent + ' · Mapping data unavailable.');
+  }
+}
 async function start() {
   catalog.forEach(model => $('model-select').add(new Option(model.name, model.key))); modelPicker.refresh();
   $('model-select').addEventListener('change', () => void switchModel($('model-select').value));
   $('asset-search').addEventListener('input', () => { state.assetPage = 0; renderAssets(); }); $('asset-collection').addEventListener('change', () => { state.assetPage = 0; renderAssets(); });
   $('mapping-search').addEventListener('input', () => { state.mappingPage = 0; renderMappings(); }); $('mapping-collection').addEventListener('change', () => { state.mappingPage = 0; renderMappings(); });
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => void setView(button.dataset.view))); document.querySelectorAll('[data-side-tab]').forEach(button => button.addEventListener('click', () => setSideTab(button.dataset.sideTab)));
-  try { state.viewer = await createIfcViewer($('viewer')); state.picker = setupModelPicker({ viewer: state.viewer, getActiveModel: () => state.models.get(state.activeKey), onSelected: async (model, localId) => { const globalId = (await model.getGuidsByLocalIds([localId]))[0]; $('selected-element').textContent = globalId ? `Selected IFC GlobalId: ${globalId}` : 'Selected model element'; } }); [state.assets, state.collections, state.mappings] = await Promise.all([getAssets(), getCollections(), getMappings()]); populateFilters(); renderAssets(); renderMappings(); await switchModel('building'); } catch (error) { status(error.message); $('viewer-overlay').textContent = `Viewer failed to start: ${error.message}`; }
+  try {
+    state.viewer = await createIfcViewer($('viewer'));
+    state.picker = setupModelPicker({ viewer: state.viewer, getActiveModel: () => state.models.get(state.activeKey), onSelected: async (model, localId) => { const globalId = (await model.getGuidsByLocalIds([localId]))[0]; $('selected-element').textContent = globalId ? `Selected IFC GlobalId: ${globalId}` : 'Selected model element'; } });
+    renderAssets(); renderMappings();
+    await switchModel('building');
+    void loadMappingData();
+  } catch (error) {
+    status(error.message); $('viewer-overlay').textContent = `Viewer failed to start: ${error.message}`;
+  }
 }
 void start();
