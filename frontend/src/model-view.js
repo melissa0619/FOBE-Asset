@@ -113,8 +113,19 @@ function populateFilters() {
 }
 async function loadMappingData() {
   try {
-    [state.assets, state.collections, state.mappings] = await Promise.all([getAssets(), getCollections(), getMappings()]);
+    const [assetResult, collectionResult, mappingResult] = await Promise.allSettled([getAssets(), getCollections(), getMappings()]);
+    if (assetResult.status === 'fulfilled') state.assets = assetResult.value;
+    if (collectionResult.status === 'fulfilled') state.collections = collectionResult.value;
+    if (mappingResult.status === 'fulfilled') state.mappings = mappingResult.value;
+    if (assetResult.status === 'rejected') throw assetResult.reason;
+    if (collectionResult.status === 'rejected' || mappingResult.status === 'rejected') {
+      const unavailable = [collectionResult.status === 'rejected' && 'collections', mappingResult.status === 'rejected' && 'mappings'].filter(Boolean).join(' and ');
+      console.warn(`Loaded ${state.assets.length} assets, but ${unavailable} are unavailable.`, { collectionResult, mappingResult });
+    }
     populateFilters(); renderAssets(); renderMappings();
+    if (assetResult.status === 'fulfilled' && (collectionResult.status === 'rejected' || mappingResult.status === 'rejected')) {
+      status(`${$('model-status').textContent} - Assets loaded; some mapping data is unavailable.`);
+    }
   } catch (error) {
     // The 3D models are static GitHub Pages assets. Mapping data is optional
     // because the production site has no local FastAPI proxy.

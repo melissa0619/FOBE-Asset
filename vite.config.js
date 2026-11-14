@@ -2,7 +2,9 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 
-const apiTarget = process.env.FOBE_API_TARGET || 'http://127.0.0.1:8000';
+// The browser calls /api; locally Node-RED owns that gateway path and forwards
+// to FastAPI as required.
+const gatewayTarget = process.env.FOBE_NODE_RED_TARGET || 'http://127.0.0.1:1880';
 const repositoryRoot = import.meta.dirname;
 
 export default defineConfig({
@@ -32,9 +34,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: apiTarget,
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/api/, '')
+        target: gatewayTarget,
+        changeOrigin: true
       }
     }
   }

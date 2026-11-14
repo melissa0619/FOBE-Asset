@@ -6,7 +6,7 @@ import { createSubmissionGuard, submitMappingEntries } from './confirmation-work
 
 const $ = id => document.getElementById(id);
 const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data'].map(id => [id, $(id)]));
-const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false };
+const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, mappingsAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false };
 const runMappingSubmission = createSubmissionGuard();
 const runUnmapping = createSubmissionGuard();
 const PAGE_SIZE = 25;
@@ -33,14 +33,16 @@ function setRecord(node, title, lines) { node.innerHTML = `<span class="record-l
 function formatIndexedAt(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'timestamp unavailable' : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: false, timeZone: 'UTC', timeZoneName: 'short' }).format(date); }
 function refreshConfirm() {
   const active = state.mode === 'batch' ? state.batch.filter(row => row.asset && !isConfirmed(row.element)) : state.selectedIfc && state.selectedAsset && !isConfirmed(state.selectedIfc) ? [{ element: state.selectedIfc, asset: state.selectedAsset }] : [];
-  els.confirm.disabled = state.isSubmitting || state.isUnmapping || !state.apiAvailable || active.length === 0;
+  // Inventory can be read without Firestore, but mapping writes require a
+  // successful mapping read so existing confirmed mappings remain protected.
+  els.confirm.disabled = state.isSubmitting || state.isUnmapping || !state.apiAvailable || !state.mappingsAvailable || active.length === 0;
   els.confirm.textContent = state.isSubmitting ? 'Confirming...' : state.mode === 'batch' ? `Confirm batch (${active.length})` : 'Confirm mapping';
   els.confirm.setAttribute('aria-busy', String(state.isSubmitting));
   els.assign.hidden = state.mode !== 'batch';
   els.assign.disabled = state.mode !== 'batch' || !state.selectedAsset || !state.batch.some(entry => keyOf(entry.element) === keyOf(state.selectedIfc));
   const mapped = state.selectedIfc && mappingFor(state.selectedIfc);
   els.unmap.hidden = !mapped;
-  els.unmap.disabled = !mapped || state.isUnmapping || state.isSubmitting || !state.apiAvailable;
+  els.unmap.disabled = !mapped || state.isUnmapping || state.isSubmitting || !state.apiAvailable || !state.mappingsAvailable;
   els.unmap.textContent = state.isUnmapping ? 'Unmapping...' : 'Unmap';
   els.unmap.setAttribute('aria-busy', String(state.isUnmapping));
 }
@@ -146,7 +148,7 @@ async function selectIfc(rawElement) {
     // so the page displays the linked itemit asset rather than only its UUID.
     state.selectedAsset = state.assets.find(asset => asset.id === persisted.itemit_item_id) || await getAsset(persisted.itemit_item_id);
   }
-  catch (error) { if (error.status !== 404) { state.apiAvailable = false; message(error.message, 'error'); } }
+  catch (error) { if (error.status !== 404) { state.mappingsAvailable = false; message(error.message, 'error'); } }
   render();
 }
 async function selectAsset(summary) {
@@ -181,8 +183,8 @@ async function confirmMappings() {
       submitted = result.submitted;
       if (result.error) failures.push(result.error.message);
       if (submitted) {
-        try { state.mappings = await getMappings(); state.apiAvailable = true; }
-        catch (error) { state.apiAvailable = false; failures.push(error.message); }
+        try { state.mappings = await getMappings(); state.mappingsAvailable = true; }
+        catch (error) { state.mappingsAvailable = false; failures.push(error.message); }
       }
       if (state.mode === 'batch') state.batch = state.batch.filter(entry => !mappingFor(entry.element));
       message(failures.length ? failures.join(' ') : `${submitted} mapping${submitted === 1 ? '' : 's'} confirmed and locked.`, failures.length ? 'error' : 'success');
@@ -229,14 +231,26 @@ async function refreshData({ announce = true } = {}) {
   els['refresh-data'].disabled = true; els['refresh-data'].setAttribute('aria-busy', 'true');
   if (announce) message('Refreshing inventory, collections, and mappings…');
   try {
-    const [assets, collections, mappings] = await Promise.all([getAssets(), getCollections(), getMappings()]);
-    state.assets = assets; state.collections = collections; state.mappings = mappings; state.apiAvailable = true;
+  const [assetResult, collectionResult, mappingResult] = await Promise.allSettled([getAssets(), getCollections(), getMappings()]);
+  if (assetResult.status === 'rejected') {
+    state.apiAvailable = false;
+    message(assetResult.reason.message || 'Unable to retrieve itemit assets.', 'error');
+    render();
+  } else {
+    const assets = assetResult.value;
+    state.assets = assets;
+    state.apiAvailable = true;
     if (selectedAssetId) state.selectedAsset = assets.find(asset => asset.id === selectedAssetId) || null;
     state.batch.forEach(entry => { if (entry.asset) entry.asset = assets.find(asset => asset.id === entry.asset.id) || entry.asset; });
+    const unavailable = [];
+    if (collectionResult.status === 'fulfilled') state.collections = collectionResult.value;
+    else { state.collections = []; unavailable.push(`collections: ${collectionResult.reason.message}`); }
+    if (mappingResult.status === 'fulfilled') { state.mappings = mappingResult.value; state.mappingsAvailable = true; }
+    else { state.mappingsAvailable = false; unavailable.push(`mappings: ${mappingResult.reason.message}`); }
     populateFilters(); render();
-    if (announce) message(`Updated ${assets.length} itemit assets, ${collections.length} collections, and ${mappings.length} mappings.`, 'success');
-  } catch (error) {
-    state.apiAvailable = false; message(error.message, 'error'); render();
+    if (unavailable.length) message(`Loaded ${assets.length} itemit assets. Some mapping data is unavailable (${unavailable.join('; ')}).`, 'error');
+    else if (announce) message(`Updated ${assets.length} itemit assets, ${state.collections.length} collections, and ${state.mappings.length} mappings.`, 'success');
+  }
   } finally {
     els['refresh-data'].disabled = false; els['refresh-data'].setAttribute('aria-busy', 'false');
   }

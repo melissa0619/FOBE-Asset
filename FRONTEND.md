@@ -27,7 +27,11 @@ npm install
 npm run dev
 ```
 
-Start FOBE-API separately on `127.0.0.1:8000`. Vite proxies `/api` locally. For a separately hosted build, set `VITE_FOBE_API_BASE_URL` and configure FastAPI CORS before deployment.
+Start FastAPI separately, then start Node-RED with its `/api` routes forwarding
+to FastAPI. Vite proxies `/api` to Node-RED at `http://127.0.0.1:1880` by
+default; override that gateway address with `FOBE_NODE_RED_TARGET`. For a
+separately hosted build, set `VITE_FOBE_API_BASE_URL` to the Node-RED gateway
+URL and configure the gateway/API CORS policy before deployment.
 
 Run `npm run build` to generate root `index.html`, `model-view.html`, `assets/`,
 `fragments/`, `ifc-index/`, `wasm/`, and `worker.mjs` for GitHub Pages.
