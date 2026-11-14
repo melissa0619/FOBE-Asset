@@ -43,16 +43,16 @@ Pages site at the repository root. Build it with:
 
 ```powershell
 npm ci
-$env:VITE_FOBE_API_BASE_URL = 'https://your-api.example.com'
+$env:VITE_API_BASE_URL = 'https://your-node-red-gateway.example.com/api'
 npm run build
 ```
 
 For GitHub Pages configured as `main → / (root)`, publish the generated root
-`index.html`, `model-view.html`, `js/`, `css/`, `fragments/`, `ifc-index/`,
+`index.html`, `model-view.html`, `assets/`, `fragments/`, `ifc-index/`,
 `wasm/`, and `worker.mjs`. The controlled build only replaces those generated
 paths; it never clears the repository root. GitHub Pages cannot proxy the
-local API, so `VITE_FOBE_API_BASE_URL` must point to a separately deployed FOBE
-API with appropriate CORS enabled.
+local API, so `VITE_API_BASE_URL` must point to the public HTTPS Node-RED
+gateway URL, including `/api`, with appropriate CORS enabled.
 See [FRONTEND.md](FRONTEND.md) for IFC-index generation details.
 
 ## Setup
@@ -110,12 +110,24 @@ Start the API after a successful sync:
 .\.venv\Scripts\python.exe .\FOBE-API\scripts\start_api.py
 ```
 
-Verify from a second terminal:
+Verify FastAPI directly from a second terminal:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod http://127.0.0.1:8000/assets?limit=1
 Invoke-RestMethod http://127.0.0.1:8000/collections?limit=100
+```
+
+Then verify the Node-RED gateway used by the local frontend:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:1880/api/assets?limit=1
+Invoke-RestMethod http://127.0.0.1:1880/api/collections?limit=100
+```
+
+Run the automated tests:
+
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 

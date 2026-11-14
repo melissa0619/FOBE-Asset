@@ -10,6 +10,9 @@ const repositoryRoot = import.meta.dirname;
 export default defineConfig({
   base: '/FOBE-Asset/',
   root: resolve(repositoryRoot, 'frontend'),
+  // Keep the frontend source under frontend/ while loading the shared local
+  // environment file from the repository root.
+  envDir: repositoryRoot,
   // Shared static inputs stay at repository root so FastAPI can keep reading
   // public/ifc-index. The controlled build script copies them to the site root.
   publicDir: resolve(repositoryRoot, 'public'),

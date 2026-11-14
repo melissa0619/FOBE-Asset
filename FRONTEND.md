@@ -30,8 +30,8 @@ npm run dev
 Start FastAPI separately, then start Node-RED with its `/api` routes forwarding
 to FastAPI. Vite proxies `/api` to Node-RED at `http://127.0.0.1:1880` by
 default; override that gateway address with `FOBE_NODE_RED_TARGET`. For a
-separately hosted build, set `VITE_FOBE_API_BASE_URL` to the Node-RED gateway
-URL and configure the gateway/API CORS policy before deployment.
+separately hosted build, set `VITE_API_BASE_URL` to the public Node-RED gateway
+URL, including `/api`, and configure the gateway/API CORS policy before deployment.
 
 Run `npm run build` to generate root `index.html`, `model-view.html`, `assets/`,
 `fragments/`, `ifc-index/`, `wasm/`, and `worker.mjs` for GitHub Pages.
@@ -43,10 +43,10 @@ choose `main`, and select `/(root)`. Commit the generated root frontend
 files after each build. The site is served below `/FOBE-Asset/`: Asset
 Mapping is `/FOBE-Asset/` and Model View is `/FOBE-Asset/model-view.html`.
 
-GitHub Pages cannot reach the local FastAPI proxy. For a production mapping
-interface, set `VITE_FOBE_API_BASE_URL` to the public HTTPS URL of the
-separately hosted FOBE API before building, and allow the Pages origin in that
-API's CORS configuration. Local `npm run dev` continues to proxy `/api` to
-`FOBE_API_TARGET` (or `http://127.0.0.1:8000`).
+GitHub Pages cannot reach the local Node-RED gateway. For a production mapping
+interface, set `VITE_API_BASE_URL` to the public HTTPS Node-RED gateway URL,
+including `/api`, before building, and allow the Pages origin in the gateway's
+CORS configuration. Local `npm run dev` continues to proxy `/api` to
+`FOBE_NODE_RED_TARGET` (or `http://127.0.0.1:1880`).
 
 Confirmed mappings are read-only. The UI only calls `GET /assets`, `GET /assets/{id}`, `GET /collections`, `GET /mappings`, `GET /mappings/status`, and `POST /mappings`.
