@@ -1,5 +1,11 @@
 export const INDEX_SCHEMA_VERSION = '1.0';
 
+// IFC type definitions (for example IFCFURNITURETYPE) describe a family, not
+// a placed instance. They do not have element geometry to select or focus.
+export function isNonGeometricIfcDefinition(element) {
+  return /TYPE$/i.test(String(element?.ifcType || ''));
+}
+
 function validElement(element, modelKey) {
   return element && element.identity?.modelKey === modelKey && typeof element.identity.globalId === 'string' && element.identity.globalId.length > 0;
 }

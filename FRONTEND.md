@@ -50,3 +50,21 @@ CORS configuration. Local `npm run dev` continues to proxy `/api` to
 `FOBE_NODE_RED_TARGET` (or `http://127.0.0.1:1880`).
 
 Confirmed mappings are read-only. The UI only calls `GET /assets`, `GET /assets/{id}`, `GET /collections`, `GET /mappings`, `GET /mappings/status`, and `POST /mappings`.
+
+## Runtime API configuration
+
+Production bundles load `config/backend.json` at runtime beneath Vite's base
+path (`/FOBE-Asset/config/backend.json` on GitHub Pages). Its `apiBaseUrl` must
+be an absolute HTTPS URL ending in `/api`. The file is deliberately outside the
+generated paths, so `npm run build` validates but does not overwrite it.
+
+Run `npm run watch:tunnel` on the Cloudflare/Node-RED host after setting local
+ignored `GITHUB_TOKEN`, `REPO_OWNER`, and `REPO_NAME` variables. The watcher
+extracts the latest Quick Tunnel URL from `TUNNEL_LOG_PATH` (default
+`logs/tunnel.log`), validates `/api/health`, and updates the public JSON through
+GitHub's Contents API. The browser refreshes configuration after its short
+cache period or a connection failure. A tunnel outage produces a visible API
+connection/configuration error; GitHub Pages updates can take time to propagate.
+
+`VITE_API_BASE_URL` remains a migration fallback only. Local `npm run dev`
+continues to use its `/api` proxy and `FOBE_NODE_RED_TARGET` configuration.

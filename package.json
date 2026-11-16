@@ -7,8 +7,9 @@
     "dev": "vite --config vite.config.js",
     "build": "node scripts/build-frontend.mjs",
     "preview": "vite preview",
-    "test": "node --test frontend/test/*.test.js",
-    "generate:ifc-index": "node scripts/generate-ifc-index.mjs"
+    "test": "node --test frontend/test/*.test.js frontend/test/*.test.cjs",
+    "generate:ifc-index": "node scripts/generate-ifc-index.mjs",
+    "watch:tunnel": "node scripts/watch-tunnel.cjs"
   },
   "devDependencies": {
     "vite": "^8.3.4"
@@ -16,6 +17,8 @@
   "dependencies": {
     "@thatopen/components": "3.4.9",
     "@thatopen/fragments": "3.4.8",
+    "chokidar": "^4.0.3",
+    "dotenv": "^18.0.10",
     "three": "0.186.1",
     "web-ifc": "0.0.77"
   }

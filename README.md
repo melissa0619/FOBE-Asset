@@ -162,3 +162,46 @@ Export the SQLite collection hierarchy:
 
 See [FOBE-API/README.md](FOBE-API/README.md) for the API contract, Firestore
 configuration, and the confirmed-only mapping workflow.
+
+## Cloudflare runtime gateway configuration
+
+GitHub Pages cannot reach `localhost`, so production browsers read their public
+HTTPS API gateway from root `config/backend.json`, served at
+`/FOBE-Asset/config/backend.json`. It contains only an HTTPS URL ending in
+`/api` and an update timestamp—never itemit, Firebase, or GitHub credentials.
+The frontend caches this value briefly and refreshes it after a connection
+failure. A Quick Tunnel URL change therefore does not require rebuilding the
+frontend.
+
+On the computer running Cloudflare and Node-RED, set local, ignored environment
+variables `GITHUB_TOKEN`, `REPO_OWNER`, and `REPO_NAME`; optionally set
+`GITHUB_BRANCH`, `TUNNEL_LOG_PATH`, and `GITHUB_PAGES_ORIGIN`. The token needs
+only fine-grained **Contents: read and write** permission for this repository.
+Then run:
+
+```powershell
+npm run watch:tunnel
+```
+
+The watcher waits for complete log writes, validates
+`https://<tunnel>/api/health`, and publishes only `config/backend.json` through
+the GitHub Contents API. It prevents overlapping/stale updates and retries
+transient network, rate-limit, server, and SHA-conflict failures. GitHub Pages
+and its CDN may still take a short time to propagate the public JSON update.
+Node-RED remains responsible for forwarding `/api/*` to FastAPI and allowing
+the GitHub Pages origin through CORS. Local `npm run dev` still proxies `/api`
+to `FOBE_NODE_RED_TARGET`.
+
+## Moving to another Windows computer
+
+Clone the repository, create `.venv`, install both Python requirements files,
+run `npm ci`, and copy `.env.example` to a new local `.env`. Configure itemit,
+Firebase, Node-RED, and GitHub watcher credentials locally; never transfer them
+through Git. `data/asset_sync.db` is ignored: preferably run `main.py` to
+regenerate it, or transfer it securely only when its current snapshot is needed
+before a sync. Install the FastAPI logon task with
+`FOBE-API/scripts/install_api_task.ps1`, and configure `scripts/run_sync.cmd`
+as a Task Scheduler action with the repository root as its **Start in** path.
+Configure the new machine's tunnel log path and run `npm run watch:tunnel`.
+Frontend rebuilds remain necessary for frontend/static changes, but not for a
+published tunnel URL update.

@@ -1,12 +1,16 @@
 import './style.css';
-import { createMapping, deleteMapping, getAsset, getAssets, getCollections, getMappingStatus, getMappings, updateDisplayName } from './api.js';
-import { loadIfcIndexes, resolveMappingIdentity } from './ifc-index.js';
+import { createMapping, deleteMapping, downloadMappedAssetsCsv, getAsset, getAssets, getCollections, getMappingStatus, getMappings, updateDisplayName } from './api.js';
+import { isNonGeometricIfcDefinition, loadIfcIndexes, resolveMappingIdentity } from './ifc-index.js';
 import { makeSearchableSelect } from './searchable-select.js';
 import { createSubmissionGuard, submitMappingEntries } from './confirmation-workflow.js';
 
 const $ = id => document.getElementById(id);
-const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data'].map(id => [id, $(id)]));
-const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, mappingsAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false };
+const refreshMetadata = document.createElement('p');
+refreshMetadata.className = 'index-state';
+refreshMetadata.textContent = 'Inventory not refreshed';
+document.querySelector('.header-metadata').append(refreshMetadata);
+const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data', 'download-csv'].map(id => [id, $(id)]));
+const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, mappingsAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false, isRefreshing: false };
 const runMappingSubmission = createSubmissionGuard();
 const runUnmapping = createSubmissionGuard();
 const PAGE_SIZE = 25;
@@ -31,6 +35,7 @@ function elementName(element) { return String(element?.name || 'Unnamed IFC elem
 function shortId(value) { const source = String(value || ''); return source.length > 14 ? `${source.slice(0, 8)}…${source.slice(-5)}` : source || 'Not available'; }
 function setRecord(node, title, lines) { node.innerHTML = `<span class="record-label">${escape(title)}</span><strong>${escape(lines.shift())}</strong>${lines.map(line => `<span>${escape(line)}</span>`).join('')}`; }
 function formatIndexedAt(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'timestamp unavailable' : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: false, timeZone: 'UTC', timeZoneName: 'short' }).format(date); }
+function formatRefreshedAt(value) { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value); }
 function refreshConfirm() {
   const active = state.mode === 'batch' ? state.batch.filter(row => row.asset && !isConfirmed(row.element)) : state.selectedIfc && state.selectedAsset && !isConfirmed(state.selectedIfc) ? [{ element: state.selectedIfc, asset: state.selectedAsset }] : [];
   // Inventory can be read without Firestore, but mapping writes require a
@@ -70,6 +75,9 @@ function renderDisplayName() {
 function elementsForCurrentModel() { return state.indexes.get(els.model.value)?.elements || []; }
 function eligibleIfc(element) {
   const scope = els['ifc-scope'].value; const mapped = isConfirmed(element);
+  // Leave confirmed legacy mappings visible, but do not offer IFC type
+  // definitions for new mappings: they cannot be localized in the viewer.
+  if (!mapped && isNonGeometricIfcDefinition(element)) return false;
   if (scope === 'likely' && !mapped && element.candidate?.classification !== 'LIKELY_ASSET') return false;
   if (scope === 'review' && !mapped && element.candidate?.classification === 'BUILDING_COMPONENT') return false;
   const filter = els['ifc-status'].value; if (filter === 'CONFIRMED' && !mapped) return false; if (filter === 'UNMAPPED' && mapped) return false;
@@ -227,6 +235,8 @@ function populateFilters() {
   locationPicker.refresh(); collectionPicker.refresh();
 }
 async function refreshData({ announce = true } = {}) {
+  if (state.isRefreshing) return;
+  state.isRefreshing = true;
   const selectedAssetId = state.selectedAsset?.id;
   els['refresh-data'].disabled = true; els['refresh-data'].setAttribute('aria-busy', 'true');
   if (announce) message('Refreshing inventory, collections, and mappings…');
@@ -240,6 +250,9 @@ async function refreshData({ announce = true } = {}) {
     const assets = assetResult.value;
     state.assets = assets;
     state.apiAvailable = true;
+    const refreshed = `Last updated ${formatRefreshedAt(new Date())}`;
+    els['refresh-data'].title = refreshed;
+    refreshMetadata.textContent = refreshed;
     if (selectedAssetId) state.selectedAsset = assets.find(asset => asset.id === selectedAssetId) || null;
     state.batch.forEach(entry => { if (entry.asset) entry.asset = assets.find(asset => asset.id === entry.asset.id) || entry.asset; });
     const unavailable = [];
@@ -252,13 +265,46 @@ async function refreshData({ announce = true } = {}) {
     else if (announce) message(`Updated ${assets.length} itemit assets, ${state.collections.length} collections, and ${state.mappings.length} mappings.`, 'success');
   }
   } finally {
+    state.isRefreshing = false;
     els['refresh-data'].disabled = false; els['refresh-data'].setAttribute('aria-busy', 'false');
+  }
+}
+async function preselectRequestedAsset() {
+  const assetId = new URLSearchParams(window.location.search).get('asset_id');
+  if (!assetId) return;
+  const asset = state.assets.find(candidate => candidate.id === assetId);
+  if (!asset) { message('The requested itemit asset is unavailable in the current inventory.', 'error'); return; }
+  await selectAsset(asset);
+  const url = new URL(window.location.href);
+  url.searchParams.delete('asset_id');
+  window.history.replaceState({}, '', url);
+}
+async function downloadCsv() {
+  els['download-csv'].disabled = true;
+  els['download-csv'].setAttribute('aria-busy', 'true');
+  try {
+    const blob = await downloadMappedAssetsCsv();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'mapped-assets.csv';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    message('Mapped-assets CSV download started.', 'success');
+  } catch (error) {
+    message(error.message || 'Unable to download mapped-assets CSV.', 'error');
+  } finally {
+    els['download-csv'].disabled = false;
+    els['download-csv'].setAttribute('aria-busy', 'false');
   }
 }
 async function start() {
   try { const { manifest, indexes } = await loadIfcIndexes(); state.indexes = indexes; const mappingModels = manifest.models.filter(model => model.key !== 'building'); for (const model of mappingModels) els.model.add(new Option(model.name || model.key, model.key)); els['index-state'].textContent = `${mappingModels.length} mapping models · Indexed ${formatIndexedAt(manifest.generatedAt)}`; }
   catch (error) { els['index-state'].textContent = 'IFC index required'; message(error.message, 'error'); return; }
   await refreshData({ announce: false });
+  await preselectRequestedAsset();
   render();
 }
 for (const control of [els['ifc-query'], els['ifc-scope'], els['ifc-status']]) control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', () => { state.ifcPage = 0; els['clear-ifc-filters'].hidden = !(els['ifc-query'].value || els['ifc-scope'].value !== 'likely' || els['ifc-status'].value); render(); });
@@ -275,6 +321,7 @@ els['previous'].addEventListener('click', () => { state.page -= 1; renderAssets(
 els['clear-ifc-filters'].addEventListener('click', () => { els['ifc-query'].value = ''; els['ifc-scope'].value = 'likely'; els['ifc-status'].value = ''; scopePicker.refresh(); ifcStatusPicker.refresh(); state.ifcPage = 0; els['clear-ifc-filters'].hidden = true; render(); });
 els['clear-asset-filters'].addEventListener('click', () => { els['asset-query'].value = ''; els.location.value = ''; els.collection.value = ''; els['asset-status'].value = ''; locationPicker.refresh(); collectionPicker.refresh(); assetStatusPicker.refresh(); state.locationFilterSource = 'user'; state.page = 0; render(); });
 els['refresh-data'].addEventListener('click', () => { void refreshData(); });
+els['download-csv'].addEventListener('click', () => { void downloadCsv(); });
 els.confirm.addEventListener('click', confirmMappings);
 els.unmap.addEventListener('click', unmapSelectedMapping);
 document.getElementById('edit-display-name').addEventListener('click', () => { state.editingDisplayName = true; render(); document.getElementById('display-name-input').focus(); });

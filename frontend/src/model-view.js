@@ -17,7 +17,7 @@ const PAGE_SIZE = 20;
 const modelPicker = makeSearchableSelect($('model-select'), { placeholder: 'Choose a model' });
 const mappingCollectionPicker = makeSearchableSelect($('mapping-collection'));
 const assetCollectionPicker = makeSearchableSelect($('asset-collection'));
-const state = { viewer: null, activeKey: null, models: new Map(), loads: new Map(), ids: new Map(), assets: [], collections: [], mappings: [], mappingPage: 0, assetPage: 0, picker: null };
+const state = { viewer: null, activeKey: null, models: new Map(), loads: new Map(), ids: new Map(), assets: [], collections: [], mappings: [], mappingsAvailable: false, mappingPage: 0, assetPage: 0, picker: null };
 const itemName = asset => asset?.name || 'Unnamed itemit asset';
 const elementName = element => element?.name || element?.globalId || 'Unnamed IFC element';
 const status = value => { $('model-status').textContent = value; };
@@ -50,8 +50,8 @@ async function switchModel(key) {
   try {
     const model = await ensureModel(entry); state.activeKey = key;
     for (const [modelKey, candidate] of state.models) candidate.object.visible = modelKey === key;
-    await frameModel(model); $('active-model').textContent = entry.name; $('viewer-overlay').hidden = true; status(`${entry.name} ready`);
-  } catch (error) { $('viewer-overlay').textContent = `Unable to load ${entry.name}: ${error.message}`; status('3D model unavailable'); }
+    await frameModel(model); $('active-model').textContent = entry.name; $('viewer-overlay').hidden = true; status(`${entry.name} ready`); return model;
+  } catch (error) { $('viewer-overlay').textContent = `Unable to load ${entry.name}: ${error.message}`; status('3D model unavailable'); return null; }
 }
 function mappingForAsset(asset) { return state.mappings.find(mapping => mapping.itemit_item_id === asset.id); }
 function collectionIds(asset) { return (asset?.collection_memberships || asset?.collections || []).map(value => typeof value === 'string' ? value : value?.id).filter(Boolean); }
@@ -62,16 +62,35 @@ function setPageControls(prefix, page, totalPages, onPrevious, onNext) {
   $(`${prefix}-previous`).onclick = onPrevious; $(`${prefix}-next`).onclick = onNext;
 }
 function renderAssets() {
+  if (!state.mappingsAvailable) {
+    $('asset-count').textContent = '';
+    $('unmapped-assets').textContent = 'Mapping data is unavailable, so unmapped assets cannot be determined.';
+    return;
+  }
   const query = $('asset-search').value.trim().toLowerCase(); const collection = $('asset-collection').value;
   const filtered = state.assets.filter(asset => !mappingForAsset(asset) && inCollection(asset, collection) && (!query || [asset.name, asset.serial, asset.current_location].some(value => String(value || '').toLowerCase().includes(query))));
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); state.assetPage = Math.min(state.assetPage, totalPages - 1);
   const visible = filtered.slice(state.assetPage * PAGE_SIZE, (state.assetPage + 1) * PAGE_SIZE);
-  $('asset-count').textContent = `${filtered.length} available`; renderAssetGroup($('unmapped-assets'), visible);
+  const container = $('unmapped-assets');
+  $('asset-count').textContent = `${filtered.length} available`; renderAssetGroup(container, visible); attachAssetNavigation(container, visible);
   setPageControls('asset', state.assetPage, totalPages, () => { state.assetPage -= 1; renderAssets(); }, () => { state.assetPage += 1; renderAssets(); });
 }
 function renderAssetGroup(container, assets) {
   container.replaceChildren(); if (!assets.length) { container.textContent = 'No unmapped assets match these filters.'; return; }
   for (const asset of assets) { const button = document.createElement('div'); button.className = 'asset-row'; button.innerHTML = `<strong>${escapeHtml(itemName(asset))}</strong><span>${escapeHtml(asset.serial || 'No serial')} · ${escapeHtml(asset.current_location || 'No location')}</span><em class="unmapped">Not mapped</em>`; container.append(button); }
+}
+function attachAssetNavigation(container, assets) {
+  [...container.children].forEach((row, index) => {
+    const asset = assets[index];
+    if (!asset) return;
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.title = 'Open Asset Mapping with this itemit asset selected';
+    row.addEventListener('click', () => navigateToMapping(asset.id));
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigateToMapping(asset.id); }
+    });
+  });
 }
 function renderMappings() {
   const query = $('mapping-search').value.trim().toLowerCase(); const collection = $('mapping-collection').value;
@@ -83,11 +102,47 @@ function renderMappings() {
   setPageControls('mapping', state.mappingPage, totalPages, () => { state.mappingPage -= 1; renderMappings(); }, () => { state.mappingPage += 1; renderMappings(); });
 }
 async function focusMapping(mapping, asset) {
-  if (mapping.model_key === 'building') return;
-  await switchModel(mapping.model_key); const model = state.models.get(mapping.model_key); const localId = state.ids.get(mapping.model_key)?.get(mapping.ifc_global_id);
-  if (localId == null) { status('This mapping exists, but its GlobalId is not present in the loaded model.'); return; }
-  await state.picker.select(model, localId); await state.picker.focus(model, localId);
+  if (!catalog.some(entry => entry.key === mapping.model_key)) {
+    status(`Incorrect model: this mapping refers to unknown model \"${mapping.model_key}\".`);
+    return;
+  }
+  const model = await switchModel(mapping.model_key);
+  if (!model || model.modelId !== mapping.model_key) {
+    status(`Incorrect model or model unavailable: \"${mapping.model_key}\" could not be loaded.`);
+    return;
+  }
+  let resolvedLocalId;
+  try {
+    [resolvedLocalId] = await model.getLocalIdsByGuids([mapping.ifc_global_id]);
+  } catch (error) {
+    status(`IFC GlobalId lookup failed for \"${mapping.ifc_global_id}\" in model \"${mapping.model_key}\".`);
+    return;
+  }
+  const localId = resolvedLocalId ?? state.ids.get(mapping.model_key)?.get(mapping.ifc_global_id);
+  if (localId == null) {
+    status(`IFC GlobalId not found: \"${mapping.ifc_global_id}\" is not in model \"${mapping.model_key}\".`);
+    return;
+  }
+  try {
+    await state.picker.focus(model, localId);
+  } catch (error) {
+    if (error.code === 'GEOMETRY_UNAVAILABLE') {
+      status(`Geometry unavailable: \"${mapping.ifc_global_id}\" has no renderable geometry in model \"${mapping.model_key}\".`);
+    } else if (error.code === 'CAMERA_FAILURE') {
+      status(`Camera control failure: unable to focus \"${mapping.ifc_global_id}\".`);
+    } else {
+      status(`Unable to focus the mapped IFC element: ${error.message}`);
+    }
+    return;
+  }
+  try { await state.picker.select(model, localId); }
+  catch (error) { status(`Highlight failure: unable to highlight \"${mapping.ifc_global_id}\".`); return; }
   $('selected-element').textContent = `${itemName(asset)} ↔ ${mapping.ifc_global_id}`;
+}
+function navigateToMapping(assetId) {
+  const url = new URL('./', window.location.href);
+  url.searchParams.set('asset_id', assetId);
+  window.location.assign(url);
 }
 function escapeHtml(value) { const node = document.createElement('span'); node.textContent = String(value); return node.innerHTML; }
 async function setView(type) {
@@ -116,7 +171,8 @@ async function loadMappingData() {
     const [assetResult, collectionResult, mappingResult] = await Promise.allSettled([getAssets(), getCollections(), getMappings()]);
     if (assetResult.status === 'fulfilled') state.assets = assetResult.value;
     if (collectionResult.status === 'fulfilled') state.collections = collectionResult.value;
-    if (mappingResult.status === 'fulfilled') state.mappings = mappingResult.value;
+    if (mappingResult.status === 'fulfilled') { state.mappings = mappingResult.value; state.mappingsAvailable = true; }
+    else state.mappingsAvailable = false;
     if (assetResult.status === 'rejected') throw assetResult.reason;
     if (collectionResult.status === 'rejected' || mappingResult.status === 'rejected') {
       const unavailable = [collectionResult.status === 'rejected' && 'collections', mappingResult.status === 'rejected' && 'mappings'].filter(Boolean).join(' and ');

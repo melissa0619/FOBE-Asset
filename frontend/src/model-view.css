@@ -47,7 +47,8 @@ h2 { font-size: 15px; }
 .mapping-row span, .asset-row span { margin-top: 3px; color: #aec5d6; font-size: 10px; }
 .mapping-row code { font: 10px ui-monospace, Consolas, monospace; }
 .asset-list { padding-right: 2px; }
-.asset-row { cursor: default; }
+.asset-row { cursor: pointer; }
+.asset-row:hover { border-color: #79d7c4; background: #17425c; }
 .asset-row em { width: max-content; max-width: 100%; margin-top: 6px; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-style: normal; }
 .asset-row em.unmapped { color: #d2dce4; background: #263747; }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #a9c1d2; font-size: 10px; }
