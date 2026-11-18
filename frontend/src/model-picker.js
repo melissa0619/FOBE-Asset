@@ -35,9 +35,30 @@ export function geometryBoundingBox(groups) {
   return hasVertex && !box.isEmpty() ? box : null;
 }
 
+export async function selectedElementBox(model, localId) {
+  let box = null;
+  try {
+    box = (await model.getBoxes([localId])).find(candidate => candidate && !candidate.isEmpty()) || null;
+    if (box) return { box, boxSource: 'fragments-item-box' };
+  } catch {
+    // Use geometry only when the supported item-box query is unavailable.
+  }
+  box = geometryBoundingBox(await model.getItemsGeometry([localId]));
+  if (box) box.applyMatrix4(model.object.matrixWorld);
+  return { box, boxSource: box ? 'geometry-fallback' : null };
+}
+
 export function setupModelPicker({ viewer, getActiveModel, onSelected }) {
   const canvas = viewer.world.renderer.three.domElement;
   let selected = null;
+  // Keep click-pipeline diagnostics available in the local Vite viewer without
+  // adding routine pointer logging to deployed builds.
+  const debug = typeof import.meta.env === 'object' && import.meta.env?.DEV;
+  const trace = (event, detail = {}) => { if (debug) console.info('[FOBE picker]', { event, ...detail }); };
+  trace('listener-registered', {
+    canvasConnected: canvas.isConnected,
+    canvasSize: { width: canvas.clientWidth, height: canvas.clientHeight }
+  });
   // This object is sent to the Fragments worker, so keep its colour
   // serializable instead of passing a THREE.Color instance across the worker
   // boundary.  preserveOriginalMaterial lets resetHighlight restore the IFC
@@ -57,34 +78,75 @@ export function setupModelPicker({ viewer, getActiveModel, onSelected }) {
     await model.highlight([localId], material);
     await viewer.fragments.core.update(true);
     onSelected?.(model, localId);
+    return { localId };
   }
   async function focus(model, localId) {
     if (!model || localId == null) return;
-    let box;
+    let box, boxSource;
     try {
-      // Ensure the loaded model has completed its current Fragments update
-      // before asking the worker for this element's geometry.
+      // Fragments' supported box API returns the box for this local ID in
+      // world coordinates, including model.object.matrixWorld. That is the
+      // same coordinate space used by the active camera controls.
       await viewer.fragments.core.update(true);
-      box = geometryBoundingBox(await model.getItemsGeometry([localId]));
+      ({ box, boxSource } = await selectedElementBox(model, localId));
     } catch (error) {
       throw focusError('GEOMETRY_UNAVAILABLE', 'The IFC element geometry could not be read.', error);
     }
     if (!box) throw focusError('GEOMETRY_UNAVAILABLE', 'The IFC element has no renderable geometry.');
+    const size = box.getSize(new THREE.Vector3());
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    sphere.radius = Math.max(sphere.radius * 1.45, 0.5);
+    sphere.radius = Math.max(sphere.radius * 1.35, 0.12);
     try {
+      // Use the same Y-up convention as the viewer's Top button before
+      // fitting. fitToSphere adjusts only the framing distance, preserving
+      // this predictable top-down orientation for every located element.
+      const topDistance = Math.max(sphere.radius * 3, 1);
+      await viewer.world.camera.controls.setLookAt(
+        sphere.center.x, sphere.center.y + topDistance, sphere.center.z,
+        sphere.center.x, sphere.center.y, sphere.center.z,
+        true
+      );
       await viewer.world.camera.controls.fitToSphere(sphere, true);
       await viewer.fragments.core.update(true);
+      return { localId, boxSource, box, dimensions: { x: size.x, y: size.y, z: size.z }, radius: sphere.radius, view: 'top' };
     } catch (error) {
       throw focusError('CAMERA_FAILURE', 'The camera controls could not focus the IFC element.', error);
     }
   }
+  // Keep interactive picks and programmatic Mapping Results location on the
+  // exact same selection path: apply the element material, flush Fragments,
+  // then frame that element's world-space box.
+  async function locate(model, localId) {
+    const selection = await select(model, localId);
+    const focusResult = await focus(model, localId);
+    return { ...focusResult, selection };
+  }
   async function pick(event) {
     const model = getActiveModel();
-    if (!model) return;
-    const hit = await model.raycast({ camera: viewer.world.camera.three, mouse: new THREE.Vector2(event.clientX, event.clientY), dom: canvas });
-    if (hit) await select(model, hit.localId);
+    trace('click-received', {
+      pointer: { x: event.clientX, y: event.clientY },
+      activeModelId: model?.modelId ?? null,
+      canvasTarget: event.target === canvas
+    });
+    if (!model) return trace('raycast-skipped', { reason: 'no-active-model' });
+    try {
+      const hit = await model.raycast({ camera: viewer.world.camera.three, mouse: new THREE.Vector2(event.clientX, event.clientY), dom: canvas });
+      trace('raycast-result', { activeModelId: model.modelId, hit: Boolean(hit), localId: hit?.localId ?? null });
+      if (!hit || hit.localId == null) return;
+      const result = await locate(model, hit.localId);
+      trace('locate-success', { activeModelId: model.modelId, localId: hit.localId, boxSource: result.boxSource, dimensions: result.dimensions });
+    } catch (error) {
+      console.error('[FOBE picker]', {
+        event: 'manual-selection-failed',
+        activeModelId: model.modelId,
+        error: error?.message || String(error)
+      });
+    }
   }
+  canvas.addEventListener('pointerdown', event => trace('pointerdown-received', {
+    pointer: { x: event.clientX, y: event.clientY },
+    canvasTarget: event.target === canvas
+  }));
   canvas.addEventListener('click', event => void pick(event));
-  return { select, focus };
+  return { select, focus, locate };
 }

@@ -1,4 +1,40 @@
 :root { color: #e8eff7; background: #081625; font-family: Inter, "Segoe UI", sans-serif; font-synthesis: none; }
+
+/* Shared Node-RED Dashboard navy/cyan tokens. */
+:root {
+  --fobe-bg: #0e1320;
+  --fobe-bg-secondary: #11192b;
+  --fobe-panel: #141f35;
+  --fobe-row: #0f1730;
+  --fobe-button: #223153;
+  --fobe-chip: #1f2a44;
+  --fobe-text: #e8eefc;
+  --fobe-text-secondary: #a7b3cc;
+  --fobe-accent: #6ee7ff;
+  --fobe-accent-text: #0a0f1d;
+  --fobe-border: #23335a;
+  --fobe-hover: #2a3a60;
+  --fobe-success-bg: #0f2e27;
+  --fobe-success-text: #7ff0c9;
+  --fobe-success-border: #1f6a57;
+  --fobe-warning-bg: #2f2a12;
+  --fobe-warning-text: #ffe28a;
+  --fobe-warning-border: #6a5c22;
+  --fobe-error-bg: #33161a;
+  --fobe-error-text: #ffa3a3;
+  --fobe-error-border: #7a2933;
+  --fobe-card-bg: #141f35;
+  --fobe-card-border: #23335a;
+  --fobe-card-hover: #1c3048;
+  --fobe-card-hover-border: #42627f;
+  --fobe-selected-bg: #244b63;
+  --fobe-selected-border: #6ee7ff;
+  --fobe-selected-text: #ffffff;
+  --fobe-selected-secondary: #d1e8f2;
+  color: var(--fobe-text);
+  background: var(--fobe-bg);
+  font-family: Poppins, "Segoe UI", system-ui, sans-serif;
+}
 .actions .danger { border-color: #a96069; background: #6d2934; color: #ffe8eb; }.actions .danger::before { content: none; }
 * { box-sizing: border-box; } html, body { min-width: 320px; } body { margin: 0; } button, input, select { font: inherit; } button { cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .48; } .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .app-shell { max-width: 1640px; margin: auto; padding: 28px; } .masthead { display: flex; align-items: end; justify-content: space-between; gap: 18px; border-bottom: 1px solid #28415a; padding-bottom: 18px; }.header-metadata { min-width: 210px; text-align: right; }.metadata-label, .eyebrow, .panel-kicker, .record-label { display: block; margin: 0 0 5px; color: #79d7c4; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; } h1, h2 { margin: 0; } h1 { font-size: clamp(25px, 3vw, 40px); letter-spacing: -.04em; } h2 { font-size: 17px; } .index-state, .count { color: #b5cadb; font-size: 12px; } .index-state { margin: 0; }
@@ -56,3 +92,108 @@ label { display: grid; gap: 6px; color: #c0d1df; font-size: 11px; font-weight: 6
 @media (min-width: 1021px) { .review-panel > .batch-queue { flex: 1 1 auto; } }
 @media (max-width: 1020px) { .mapping-grid { grid-template-columns: 1fr 1fr; }.review-panel { grid-column: 1 / -1; order: -1; }.asset-list { max-height: 380px; } }
 @media (max-width: 660px) { .app-shell { padding: 16px; }.masthead { display: block; }.header-metadata { min-width: 0; text-align: left; margin-top: 10px; }.mapping-grid, .inline-fields { grid-template-columns: 1fr; }.review-panel { grid-column: auto; }.panel { min-height: auto; }.panel-toolbar { flex-wrap: wrap; }.toolbar-search { min-width: 150px; }.asset-list { max-height: 320px; }.single-review { grid-template-columns: 1fr; }.pair-connector { min-height: 16px; }.queue-select { grid-template-columns: minmax(0, 1fr) auto; }.queue-assignment { grid-column: 1 / -1; }.queue-select .status-badge { grid-column: 2; grid-row: 1; } }
+
+/* Mapping review: concise inspection cards and a scan-friendly batch ledger. */
+.record-card { gap: 8px; }
+.record-card > strong { line-height: 1.3; overflow-wrap: anywhere; }
+.record-facts { display: grid; gap: 3px; color: #b5cadb; font-size: 10px; line-height: 1.35; }
+.record-details { margin-top: 2px; border-top: 1px solid #29445e; padding-top: 7px; color: #b8cede; font-size: 10px; }
+.record-details summary { width: fit-content; color: #8ed5f4; cursor: pointer; }
+.record-details > div { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding-top: 6px; }
+.record-details > div > span { color: #8faabc; }
+.record-details code { min-width: 0; overflow-wrap: anywhere; color: #d7e7f1; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.copy-id { border: 1px solid #42617c; border-radius: 4px; background: transparent; color: #b9dced; padding: 3px 5px; font-size: 9px; cursor: pointer; }
+.copy-id:hover, .copy-id:focus-visible { border-color: #79d7c4; color: #effffc; outline: 0; }
+.batch-progress { margin-right: auto; color: #8ed5f4; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.review-panel .actions { flex-wrap: wrap; }
+.queue-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) auto auto; gap: 8px; padding: 0 9px 3px; color: #8faabc; font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.queue-row { grid-template-columns: minmax(0, 1fr) auto; gap: 7px 8px; }
+.queue-select { grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) auto; }
+.queue-row-actions { display: flex; align-items: start; gap: 7px; }
+.queue-row-actions .text-button { white-space: nowrap; }
+.queue-remove { margin: 0; }
+.queue-details { margin-top: 0; }
+@media (max-width: 660px) {
+  .record-details > div { grid-template-columns: 70px minmax(0, 1fr); }
+  .record-details .copy-id { grid-column: 2; justify-self: start; }
+  .queue-columns { display: none; }
+  .queue-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .queue-select { grid-template-columns: minmax(0, 1fr) auto; }
+  .queue-assignment { grid-column: 1 / -1; }
+  .queue-select .status-badge { grid-column: 2; grid-row: 1; }
+  .queue-row-actions { grid-column: 2; grid-row: 1; padding-top: 20px; }
+  .queue-details { grid-column: 1 / -1; }
+}
+
+/* Single mapping is a vertical evidence trail, not two cramped comparison cards. */
+.single-review { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+.single-review.single-sided-review { grid-template-columns: minmax(0, 1fr); }
+.single-review .record-card { width: 100%; padding: 12px; }
+.pair-connector { min-height: 18px; grid-template-columns: auto auto; gap: 6px; justify-content: start; padding-left: 2px; font-size: 15px; }
+.pair-connector::after { content: 'Link to'; color: #8ed5f4; font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.record-identifier { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid #29445e; border-radius: 6px; background: #0a1827; color: #8faabc; font-size: 10px; }
+.record-identifier code { min-width: 0; overflow: hidden; color: #d7e7f1; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.record-details code, .queue-details code { display: block; max-width: 100%; overflow: auto; color: #d7e7f1; overflow-wrap: normal; white-space: nowrap; word-break: normal; }
+
+/* Bounded review body: details and the batch queue scroll, actions never do. */
+.review-panel { min-height: 0; overflow: hidden; }
+.review-panel > .review-content { min-height: 0; flex: 1 1 auto; }
+.review-content { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 10px; overflow: auto; overscroll-behavior: contain; padding: 1px 3px 3px 1px; scrollbar-width: none; }
+.review-content::-webkit-scrollbar { display: none; }
+.review-content > .batch-queue { min-height: 0; flex: 1 1 auto; }
+.review-panel > .actions { flex: 0 0 auto; margin-top: 0; padding-top: 10px; border-top: 1px solid #2d4c66; background: #102338; }
+
+/* The middle panel is narrow: present batch assignments as compact ledgers. */
+.queue-columns { display: none; }
+.queue-row { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding: 10px; }
+.queue-select { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; }
+.queue-element { grid-column: 1; grid-row: 1; }
+.queue-select .status-badge { grid-column: 2; grid-row: 1; }
+.queue-assignment { grid-column: 1 / -1; grid-row: 2; padding-top: 6px; border-top: 1px solid #29445e; }
+.queue-details { order: 2; margin: 0; }
+.queue-row-actions { order: 3; align-items: center; justify-content: flex-end; margin-top: 0; padding-top: 7px; border-top: 1px solid #29445e; }
+.queue-row-actions .text-button { min-height: 26px; padding: 4px 0; }
+@media (max-width: 660px) {
+  .review-content { overflow: visible; }
+  .queue-row-actions { grid-column: auto; grid-row: auto; padding-top: 7px; }
+}
+
+/* Theme application: preserve the workspace layout while unifying surfaces,
+   actions, and semantic states with the dashboard palette. */
+body { color: var(--fobe-text); background: var(--fobe-bg); }
+.masthead { border-color: var(--fobe-border); }
+.metadata-label, .eyebrow, .panel-kicker, .record-label, .pair-connector, .pair-connector::after { color: var(--fobe-accent); }
+.index-state, .count, .message, .record-facts, .mapping-lock-notice, .queue-instruction, .queue-empty, .active-filters { color: var(--fobe-text-secondary); }
+.message.error { color: var(--fobe-error-text); }.message.success { color: var(--fobe-success-text); }
+.panel, .review-panel > .actions { border-color: var(--fobe-border); background: var(--fobe-panel); }
+label { color: var(--fobe-text-secondary); }
+input, select { border-color: var(--fobe-border); background: var(--fobe-row); color: var(--fobe-text); }
+input::placeholder { color: var(--fobe-text-secondary); }
+input:focus, select:focus, button:focus-visible { outline-color: var(--fobe-accent); }
+.filter-toggle, .pagination button, .copy-id, .actions .secondary, .display-name-editor .secondary { border-color: var(--fobe-border); background: var(--fobe-button); color: var(--fobe-text); }
+.filter-toggle:hover, .filter-toggle[aria-expanded="true"], .pagination button:hover:not(:disabled), .copy-id:hover, .copy-id:focus-visible { border-color: var(--fobe-accent); background: var(--fobe-hover); color: var(--fobe-accent); }
+.filter-panel, .single-review.batch-pair-preview, .record-identifier, .display-name-view, .display-name-editor { border-color: var(--fobe-border); background: var(--fobe-bg-secondary); color: var(--fobe-text-secondary); }
+.mode-switch { background: var(--fobe-row); }.mode-switch button { color: var(--fobe-text-secondary); }.mode-switch button.active { background: var(--fobe-accent); color: var(--fobe-accent-text); box-shadow: none; }
+.text-button, .record-details summary, .queue-header > div > span, .batch-progress { color: var(--fobe-accent); }
+.list-row { color: var(--fobe-text); background: var(--fobe-card-bg); border-color: var(--fobe-card-border); border-left-color: var(--fobe-button); }
+.list-row:hover:not(:disabled), .list-row.batch-selected:not(.selected) { background: var(--fobe-card-hover); border-color: var(--fobe-card-hover-border); }
+.list-row.selected { border: 2px solid var(--fobe-selected-border); border-left-color: var(--fobe-selected-border); background: var(--fobe-selected-bg); box-shadow: none; color: var(--fobe-selected-text); }
+.list-row.selected strong { color: var(--fobe-selected-text); }.list-row.selected span, .list-row.selected code { color: var(--fobe-selected-secondary); }
+.list-row.selected .status-unmapped { color: var(--fobe-text-secondary); background: var(--fobe-chip); border-color: var(--fobe-border); }.list-row.selected .status-confirmed { color: var(--fobe-success-text); background: var(--fobe-success-bg); border-color: var(--fobe-success-border); }.list-row.selected .status-assigned { color: var(--fobe-warning-text); background: var(--fobe-warning-bg); border-color: var(--fobe-warning-border); }
+.list-row.locked { border-left-color: var(--fobe-success-border); }
+.list-row span, .list-row code, .record-details code, .queue-details code, .record-identifier code { color: var(--fobe-text-secondary); }
+.status-unmapped { color: var(--fobe-text-secondary); background: var(--fobe-chip); border-color: var(--fobe-border); }
+.status-confirmed { color: var(--fobe-success-text); background: var(--fobe-success-bg); border-color: var(--fobe-success-border); }
+.status-assigned { color: var(--fobe-warning-text); background: var(--fobe-warning-bg); border-color: var(--fobe-warning-border); }
+.record-card, .queue-row { border-color: var(--fobe-card-border); background: var(--fobe-card-bg); color: var(--fobe-text-secondary); }
+.record-card strong, .display-name-view strong { color: var(--fobe-text); }
+.record-details, .queue-details, .queue-assignment, .queue-row-actions, .review-panel > .actions { border-color: var(--fobe-border); }
+.queue-select { background: transparent; color: var(--fobe-text); }
+.single-review .record-card, .queue-row.active, .queue-row:has(.status-assigned) { border: 2px solid var(--fobe-selected-border); background: var(--fobe-selected-bg); color: var(--fobe-selected-secondary); }
+.single-review .record-card strong, .queue-row.active strong, .queue-row:has(.status-assigned) strong { color: var(--fobe-selected-text); }
+.single-review .record-card .record-facts, .single-review .record-card .record-identifier, .queue-row.active .queue-assignment, .queue-row.active .queue-assignment span, .queue-row:has(.status-assigned) .queue-assignment, .queue-row:has(.status-assigned) .queue-assignment span { color: var(--fobe-selected-secondary); }
+.queue-row:hover:not(.active) { border-color: var(--fobe-card-hover-border); background: var(--fobe-card-hover); }
+.list-row, .record-card, .queue-row { transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
+.list-row input { accent-color: var(--fobe-selected-border); }
+.actions button, .display-name-editor button { border-color: var(--fobe-accent); background: var(--fobe-accent); color: var(--fobe-accent-text); }
+.actions .danger { border-color: var(--fobe-error-border); background: var(--fobe-error-bg); color: var(--fobe-error-text); }

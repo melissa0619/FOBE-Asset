@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from io import StringIO
 from typing import Any, Callable
 
 import pandas as pd

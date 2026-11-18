@@ -1,9 +1,41 @@
 export const INDEX_SCHEMA_VERSION = '1.0';
 
+// These IFC entities describe definitions, model hierarchy, or reference data.
+// They are kept in the index for inspection and legacy mappings, but cannot be
+// selected as new itemit mapping targets.
+const EXCLUDED_IFC_ENTITY_TYPES = new Set([
+  'IFCPROJECT',
+  'IFCSITE',
+  'IFCBUILDING',
+  'IFCBUILDINGSTOREY',
+  'IFCSPACE',
+  'IFCGROUP',
+  'IFCGRID',
+  'IFCMATERIAL',
+  'IFCSURFACESTYLE',
+  'IFCOPENINGELEMENT',
+  'IFCDISTRIBUTIONPORT',
+]);
+
+export function normaliseIfcType(ifcType) {
+  return String(ifcType || '').trim().toUpperCase();
+}
+
+export function isExcludedIfcEntity(ifcType) {
+  const type = normaliseIfcType(ifcType);
+  return Boolean(type) && (type.endsWith('TYPE') || EXCLUDED_IFC_ENTITY_TYPES.has(type));
+}
+
+// Legacy confirmed mappings remain visible for inspection and unmapping, even
+// when the IFC entity is no longer allowed as a new mapping target.
+export function shouldDisplayIfcInMappingList(element, { hasConfirmedMapping = false } = {}) {
+  return hasConfirmedMapping || !isExcludedIfcEntity(element?.ifcType);
+}
+
 // IFC type definitions (for example IFCFURNITURETYPE) describe a family, not
 // a placed instance. They do not have element geometry to select or focus.
 export function isNonGeometricIfcDefinition(element) {
-  return /TYPE$/i.test(String(element?.ifcType || ''));
+  return normaliseIfcType(element?.ifcType).endsWith('TYPE');
 }
 
 function validElement(element, modelKey) {
