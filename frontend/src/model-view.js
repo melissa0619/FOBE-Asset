@@ -4,7 +4,9 @@ import { createIfcViewer } from './viewer.js';
 import { setupModelPicker } from './model-picker.js';
 import { downloadMappedAssetsCsv, getAssets, getCollections, getMappings } from './api.js';
 import { isExcludedIfcEntity, isNonGeometricIfcDefinition, loadIfcIndexes } from './ifc-index.js';
-import { mappedIfcDisplayName, mappingForIfc } from './mapping-selection.js';
+import { mappingForIfc } from './mapping-selection.js';
+import { assetHasKnownCollection, assetMatchesCollectionNode, createCollectionHierarchy } from './collection-hierarchy.js';
+import { fullIfcDisplayName, mappingDisplayName } from './mapping-presentation.js';
 import { makeSearchableSelect } from './searchable-select.js';
 
 const $ = id => document.getElementById(id);
@@ -17,15 +19,17 @@ const catalog = [
 ];
 const PAGE_SIZE = 20;
 const modelPicker = makeSearchableSelect($('model-select'), { placeholder: 'Choose a model', searchable: false });
-const mappingCollectionPicker = makeSearchableSelect($('mapping-collection'), { placeholder: 'All collections', searchable: false });
-const assetCollectionPicker = makeSearchableSelect($('asset-collection'), { placeholder: 'All collections', searchable: false });
-const state = { viewer: null, activeKey: null, models: new Map(), loads: new Map(), ids: new Map(), ifcElements: new Map(), assets: [], collections: [], mappings: [], mappingsAvailable: false, mappingLoading: true, mappingPage: 0, assetPage: 0, picker: null, selectedIfc: null, selectionVersion: 0, suppressViewerSelection: false };
+const state = { viewer: null, activeKey: null, models: new Map(), loads: new Map(), ids: new Map(), ifcElements: new Map(), assets: [], collections: [], hierarchy: null, mappings: [], mappingsAvailable: false, assetsLoading: true, assetsError: null, collectionsLoading: true, mappingLoading: true, collectionError: null, mappingError: null, mappingNodeId: null, expandedCollectionIds: new Set(), assetNodeId: null, expandedAssetCollectionIds: new Set(), mappingPage: 0, assetPage: 0, picker: null, selectedIfc: null, selectionVersion: 0, suppressViewerSelection: false };
 const itemName = asset => asset?.name || 'Unnamed itemit asset';
 const elementName = element => element?.name || element?.globalId || 'Unnamed IFC element';
 const modelName = key => catalog.find(entry => entry.key === key)?.name || key || 'Unknown model';
 const assetIdentifier = asset => asset?.serial || asset?.id || 'Not recorded';
 const assetIdentifierLabel = asset => asset?.serial ? 'Serial' : 'itemit ID';
 const status = value => { $('model-status').textContent = value; };
+function initializeAssetInventoryPanel() {
+  const pane = $('assets-pane'); pane.querySelector('h2').textContent = 'Itemit assets'; pane.querySelector('.pane-help').textContent = 'Browse the itemit inventory by collection, name, serial, or location.';
+  if (!$('asset-mapping-warning')) { const warning = document.createElement('p'); warning.id = 'asset-mapping-warning'; warning.className = 'asset-mapping-warning'; warning.setAttribute('role', 'status'); warning.hidden = true; $('asset-selection').after(warning); }
+}
 async function bytes(path) { const response = await fetch(path); if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`); return new Uint8Array(await response.arrayBuffer()); }
 async function buildLookup(model, key) {
   const localIds = Array.from(await model.getItemsIdsWithGeometry());
@@ -67,7 +71,7 @@ function selectedIndexedElement() {
 function renderAssetSelection() {
   const container = $('asset-selection'); const selection = state.selectedIfc;
   if (!selection) { container.hidden = true; container.replaceChildren(); container.removeAttribute('role'); container.removeAttribute('tabindex'); container.removeAttribute('title'); container.onclick = null; container.onkeydown = null; return; }
-  const element = selectedIndexedElement(); const mapping = mappingForIfc(state.mappings, selection.modelKey, selection.ifcGlobalId);
+  const element = selectedIndexedElement(); const mapping = state.mappingsAvailable && mappingForIfc(state.mappings, selection.modelKey, selection.ifcGlobalId);
   const ifcName = elementName(element || { globalId: selection.ifcGlobalId });
   const ifcType = element?.ifcType || 'IFC type unavailable';
   const ifcDetails = `<span class="selection-ifc"><span class="card-label">Selected IFC element <span class="selection-arrow" aria-hidden="true">→</span></span><strong>${escapeHtml(ifcName)}</strong><span class="ifc-type">${escapeHtml(ifcType)}</span><span class="ifc-metadata"><span><b>Model</b>${escapeHtml(modelName(selection.modelKey))}</span><span><b>GlobalId</b><code>${escapeHtml(selection.ifcGlobalId)}</code></span></span></span>`;
@@ -99,10 +103,99 @@ function selectIfcContext(modelKey, ifcGlobalId) {
 function clearIfcContext() { selectIfcContext(null, null); }
 function collectionIds(asset) { return (asset?.collection_memberships || asset?.collections || []).map(value => typeof value === 'string' ? value : value?.id).filter(Boolean); }
 function inCollection(asset, collectionId) { return !collectionId || collectionIds(asset).includes(collectionId); }
+function availableAssetsForCollectionNode(nodeId) {
+  return state.assets.filter(asset => !nodeId || assetMatchesCollectionNode(asset, state.hierarchy, nodeId));
+}
+function assetSelectionPath() { return state.assetNodeId && state.hierarchy?.nodes.has(state.assetNodeId) ? state.hierarchy.path(state.assetNodeId).join(' › ') : 'All collections'; }
+function renderAssetCollectionTree() {
+  const trigger = $('asset-tree-trigger'); const tree = $('asset-tree'); const note = $('asset-hierarchy-note'); const hierarchy = state.hierarchy; const hasHierarchy = Boolean(hierarchy?.roots.length);
+  trigger.disabled = state.collectionsLoading || !hasHierarchy; trigger.classList.toggle('is-loading', state.collectionsLoading); trigger.textContent = state.collectionsLoading ? '' : hasHierarchy ? assetSelectionPath() : 'Collections unavailable'; trigger.title = state.collectionsLoading ? 'Loading collections' : assetSelectionPath(); tree.replaceChildren();
+  if (state.collectionsLoading) { note.hidden = true; note.replaceChildren(); return; }
+  if (!hasHierarchy) { note.hidden = false; note.replaceChildren('Collection hierarchy is unavailable. '); const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingData()); note.append(retry); return; }
+  const appendNode = (id, depth = 0, ancestors = new Set()) => {
+    const node = hierarchy.nodes.get(id); if (!node) return; const children = (hierarchy.children.get(id) || []).filter(child => !ancestors.has(child)); const branch = children.length > 0;
+    const row = document.createElement('div'); row.className = 'asset-tree-node'; row.classList.toggle('is-selected', state.assetNodeId === id); row.style.setProperty('--tree-depth', depth);
+    const toggle = branch ? document.createElement('button') : document.createElement('span'); toggle.className = branch ? 'asset-tree-toggle' : 'asset-tree-chevron-spacer';
+    if (branch) { const expanded = state.expandedAssetCollectionIds.has(id); toggle.type = 'button'; toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${node.name}`); toggle.setAttribute('aria-expanded', String(expanded)); toggle.innerHTML = '<svg class="asset-tree-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'; if (expanded) toggle.classList.add('is-expanded'); toggle.addEventListener('click', event => { event.stopPropagation(); state.expandedAssetCollectionIds.has(id) ? state.expandedAssetCollectionIds.delete(id) : state.expandedAssetCollectionIds.add(id); renderAssetCollectionTree(); }); } else toggle.setAttribute('aria-hidden', 'true');
+    const select = document.createElement('button'); select.type = 'button'; select.className = 'asset-tree-node-label'; select.setAttribute('role', 'treeitem'); select.setAttribute('aria-level', String(depth + 1)); select.setAttribute('aria-selected', String(state.assetNodeId === id)); if (branch) select.setAttribute('aria-expanded', String(state.expandedAssetCollectionIds.has(id))); select.title = hierarchy.path(id).join(' › ');
+    const label = document.createElement('span'); label.className = 'asset-tree-node-text'; label.textContent = node.name; const count = document.createElement('span'); count.className = 'asset-tree-node-count'; count.textContent = `(${availableAssetsForCollectionNode(id).length})`; count.setAttribute('aria-label', `${availableAssetsForCollectionNode(id).length} available itemit assets`);
+    select.append(label, count); select.addEventListener('click', () => { state.assetNodeId = id; state.assetPage = 0; $('asset-tree-popover').hidden = true; trigger.setAttribute('aria-expanded', 'false'); renderAssetCollectionTree(); renderAssets(); trigger.focus(); }); row.append(toggle, select); tree.append(row);
+    if (branch && state.expandedAssetCollectionIds.has(id)) children.forEach(child => appendNode(child, depth + 1, new Set([...ancestors, id])));
+  };
+  hierarchy.roots.forEach(id => appendNode(id));
+  if (state.collectionError) { note.hidden = false; note.replaceChildren('Showing the last available hierarchy. '); const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingData()); note.append(retry); } else { note.hidden = true; note.replaceChildren(); }
+}
+const UNCLASSIFIED_NODE_ID = '__unclassified__';
+function mappingsForCollectionNode(nodeId) {
+  if (nodeId === UNCLASSIFIED_NODE_ID) return state.mappings.filter(mapping => !assetHasKnownCollection(state.assets.find(asset => asset.id === mapping.itemit_item_id), state.hierarchy));
+  return state.mappings.filter(mapping => assetMatchesCollectionNode(state.assets.find(asset => asset.id === mapping.itemit_item_id), state.hierarchy, nodeId));
+}
+function selectedHierarchyNode() { return state.mappingNodeId; }
+function selectionPath() {
+  if (state.mappingNodeId === UNCLASSIFIED_NODE_ID) return 'Unclassified';
+  return state.hierarchy?.nodes.has(state.mappingNodeId) ? state.hierarchy.path(state.mappingNodeId).join(' › ') : 'Select a category';
+}
+function renderCollectionTree() {
+  const trigger = $('mapping-tree-trigger'); const tree = $('mapping-tree'); const note = $('mapping-hierarchy-note'); const hierarchy = state.hierarchy;
+  const treeLoading = state.mappingLoading || state.collectionsLoading;
+  $('mapping-search').disabled = treeLoading || !state.mappingNodeId;
+  const hasHierarchy = Boolean(hierarchy?.roots.length);
+  trigger.disabled = treeLoading || !hasHierarchy; trigger.classList.toggle('is-loading', treeLoading);
+  trigger.textContent = treeLoading ? '' : !hasHierarchy ? 'Collection hierarchy unavailable' : selectionPath();
+  trigger.title = treeLoading ? 'Loading collection hierarchy' : selectionPath();
+  tree.replaceChildren();
+  if (treeLoading) { note.hidden = true; note.replaceChildren(); return; }
+  if (!hasHierarchy) {
+    note.hidden = false;
+    note.replaceChildren('Collection hierarchy is unavailable. ');
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingData()); note.append(retry); return;
+  }
+  const countFor = id => mappingsForCollectionNode(id).length;
+  const appendNode = (id, depth = 0, ancestors = new Set()) => {
+    const node = hierarchy.nodes.get(id); if (!node) return;
+    const children = (hierarchy.children.get(id) || []).filter(child => !ancestors.has(child)); const branch = children.length > 0;
+    const row = document.createElement('div'); row.className = 'mapping-tree-node'; row.classList.toggle('is-selected', state.mappingNodeId === id); row.style.setProperty('--tree-depth', depth);
+    const toggle = branch ? document.createElement('button') : document.createElement('span'); toggle.className = branch ? 'tree-toggle' : 'tree-chevron-spacer';
+    if (branch) {
+      const expanded = state.expandedCollectionIds.has(id); toggle.type = 'button'; toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${node.name}`); toggle.setAttribute('aria-expanded', String(expanded)); toggle.innerHTML = '<svg class="tree-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>';
+      if (expanded) toggle.classList.add('is-expanded');
+      toggle.addEventListener('click', event => { event.stopPropagation(); state.expandedCollectionIds.has(id) ? state.expandedCollectionIds.delete(id) : state.expandedCollectionIds.add(id); renderCollectionTree(); });
+    } else toggle.setAttribute('aria-hidden', 'true');
+    const select = document.createElement('button'); select.type = 'button'; select.className = 'tree-node-label'; select.setAttribute('role', 'treeitem'); select.setAttribute('aria-level', String(depth + 1)); select.setAttribute('aria-selected', String(state.mappingNodeId === id)); if (branch) select.setAttribute('aria-expanded', String(state.expandedCollectionIds.has(id))); select.title = hierarchy.path(id).join(' › ');
+    const label = document.createElement('span'); label.className = 'tree-node-text'; label.textContent = node.name;
+    const count = document.createElement('span'); count.className = 'tree-node-count'; count.textContent = `(${countFor(id)})`; count.setAttribute('aria-label', `${countFor(id)} confirmed mappings`);
+    select.append(label, count); select.addEventListener('click', () => { state.mappingNodeId = id; state.mappingPage = 0; $('mapping-tree-popover').hidden = true; trigger.setAttribute('aria-expanded', 'false'); renderCollectionTree(); renderMappings(); trigger.focus(); });
+    row.append(toggle, select); tree.append(row);
+    if (branch && state.expandedCollectionIds.has(id)) children.forEach(child => appendNode(child, depth + 1, new Set([...ancestors, id])));
+  };
+  hierarchy.roots.forEach(id => appendNode(id));
+  const unclassified = countFor(UNCLASSIFIED_NODE_ID);
+  if (unclassified) { const row = document.createElement('div'); row.className = 'mapping-tree-node unclassified-node'; row.classList.toggle('is-selected', state.mappingNodeId === UNCLASSIFIED_NODE_ID); const spacer = document.createElement('span'); spacer.className = 'tree-chevron-spacer'; spacer.setAttribute('aria-hidden', 'true'); const select = document.createElement('button'); select.type = 'button'; select.className = 'tree-node-label'; select.setAttribute('role', 'treeitem'); select.setAttribute('aria-selected', String(state.mappingNodeId === UNCLASSIFIED_NODE_ID)); const label = document.createElement('span'); label.className = 'tree-node-text'; label.textContent = 'Unclassified'; const count = document.createElement('span'); count.className = 'tree-node-count'; count.textContent = `(${unclassified})`; count.setAttribute('aria-label', `${unclassified} confirmed mappings`); select.append(label, count); select.addEventListener('click', () => { state.mappingNodeId = UNCLASSIFIED_NODE_ID; state.mappingPage = 0; $('mapping-tree-popover').hidden = true; trigger.setAttribute('aria-expanded', 'false'); renderCollectionTree(); renderMappings(); trigger.focus(); }); row.append(spacer, select); tree.append(row); }
+  if (state.collectionError) {
+    note.hidden = false;
+    note.replaceChildren('Showing the last available hierarchy. ');
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingData()); note.append(retry);
+  } else { note.hidden = true; note.replaceChildren(); }
+}
 function setPageControls(prefix, page, totalPages, onPrevious, onNext) {
   $(`${prefix}-page`).textContent = `Page ${page + 1} of ${totalPages}`;
   $(`${prefix}-previous`).disabled = page === 0; $(`${prefix}-next`).disabled = page >= totalPages - 1;
   $(`${prefix}-previous`).onclick = onPrevious; $(`${prefix}-next`).onclick = onNext;
+}
+function renderMappingEmptyState(title, description) {
+  const container = $('mapping-list'); container.replaceChildren(); container.classList.remove('is-loading', 'soft-loading-list');
+  const empty = document.createElement('div'); empty.className = 'mapping-empty-state';
+  empty.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5L12 12 3.5 7.5Z"></path><path d="M3.5 12.25 12 16.75l8.5-4.5M3.5 17 12 21.5l8.5-4.5"></path></svg>';
+  const heading = document.createElement('strong'); heading.textContent = title;
+  const detail = document.createElement('p'); detail.textContent = description;
+  empty.append(heading, detail); container.append(empty);
+}
+function setMappingPagerVisible(visible) { $('mapping-pager').hidden = !visible; }
+function renderMappingTotal() { $('mapping-count').textContent = state.mappingLoading ? '' : `${state.mappings.length} confirmed`; }
+function renderLoadingCards(container, kind, message, count) {
+  container.replaceChildren(); container.classList.remove('is-loading'); container.classList.add('soft-loading-list');
+  const label = document.createElement('p'); label.className = 'soft-loading-message'; label.textContent = message; container.append(label);
+  for (let index = 0; index < count; index += 1) { const card = document.createElement('div'); card.className = `soft-skeleton-card ${kind}`; card.setAttribute('aria-hidden', 'true'); card.innerHTML = '<span></span><span></span><span></span>'; container.append(card); }
 }
 function renderAssets() {
   try {
@@ -113,25 +206,29 @@ function renderAssets() {
     console.warn('[FOBE mapping selection] Unable to render selected IFC context', error);
     const selection = $('asset-selection'); selection.hidden = true; selection.replaceChildren();
   }
-  if (!state.mappingsAvailable) {
-    $('asset-count').textContent = '';
-    $('unmapped-assets').textContent = 'Mapping data is unavailable, so unmapped assets cannot be determined.';
-    return;
+  const warning = $('asset-mapping-warning'); warning.replaceChildren();
+  if (state.mappingError) { warning.hidden = false; warning.append('Mapping status temporarily unavailable. '); const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingStatus()); warning.append(retry); } else warning.hidden = true;
+  const container = $('unmapped-assets');
+  if (state.assetsLoading && !state.assets.length) {
+    renderLoadingCards(container, 'asset', 'Loading itemit assets...', 4); $('asset-count').textContent = ''; $('asset-previous').parentElement.hidden = true; setPageControls('asset', 0, 1, () => {}, () => {}); return;
   }
-  const query = $('asset-search').value.trim().toLowerCase(); const collection = $('asset-collection').value;
-  const filtered = state.assets.filter(asset => !mappingForAsset(asset) && inCollection(asset, collection) && (!query || [asset.name, asset.serial, asset.current_location].some(value => String(value || '').toLowerCase().includes(query))));
+  if (state.assetsError && !state.assets.length) {
+    container.replaceChildren(); container.classList.remove('is-loading', 'soft-loading-list'); const message = document.createElement('span'); message.textContent = 'Itemit assets could not be loaded.'; const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadInventoryAssets()); container.append(message, retry); $('asset-count').textContent = 'Unavailable'; $('asset-previous').parentElement.hidden = true; setPageControls('asset', 0, 1, () => {}, () => {}); return;
+  }
+  const query = $('asset-search').value.trim().toLowerCase();
+  const filtered = availableAssetsForCollectionNode(state.assetNodeId).filter(asset => !query || [asset.name, asset.serial, asset.current_location].some(value => String(value || '').toLowerCase().includes(query)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); state.assetPage = Math.min(state.assetPage, totalPages - 1);
   const visible = filtered.slice(state.assetPage * PAGE_SIZE, (state.assetPage + 1) * PAGE_SIZE);
-  const container = $('unmapped-assets');
-  $('asset-count').textContent = `${filtered.length} available`; renderAssetGroup(container, visible);
+  container.classList.remove('is-loading', 'soft-loading-list'); $('asset-count').textContent = `${filtered.length} assets`; $('asset-previous').parentElement.hidden = false; renderAssetGroup(container, visible);
   setPageControls('asset', state.assetPage, totalPages, () => { state.assetPage -= 1; renderAssets(); }, () => { state.assetPage += 1; renderAssets(); });
 }
 function renderAssetGroup(container, assets) {
-  container.replaceChildren(); if (!assets.length) { container.textContent = 'No unmapped assets match these filters.'; return; }
+  container.replaceChildren(); if (!assets.length) { container.textContent = 'No itemit assets match these filters.'; return; }
   for (const asset of assets) {
     const card = document.createElement('article'); card.className = 'asset-row';
     const open = document.createElement('button'); open.type = 'button'; open.className = 'asset-row-main'; open.title = 'Open Asset Mapping with this itemit asset selected';
-    open.innerHTML = `<span class="card-heading"><span class="card-label">itemit asset</span><strong>${escapeHtml(itemName(asset))}</strong><em class="status-badge status-unmapped">Unmapped</em></span><span class="asset-field"><span>${escapeHtml(assetIdentifierLabel(asset))}</span><code>${escapeHtml(assetIdentifier(asset))}</code></span><span class="asset-field"><span>Location</span><b>${escapeHtml(asset?.current_location || 'Not recorded')}</b></span>`;
+    const mapped = state.mappingsAvailable && mappingForAsset(asset); const mappingStatus = state.mappingsAvailable ? (mapped ? ['Confirmed', 'status-confirmed'] : ['Not mapped', 'status-unmapped']) : ['Unknown', 'status-unknown'];
+    open.innerHTML = `<span class="card-heading"><span class="card-label">itemit asset</span><strong>${escapeHtml(itemName(asset))}</strong><em class="status-badge ${mappingStatus[1]}">${mappingStatus[0]}</em></span><span class="asset-field"><span>${escapeHtml(assetIdentifierLabel(asset))}</span><code>${escapeHtml(assetIdentifier(asset))}</code></span><span class="asset-field"><span>Location</span><b>${escapeHtml(asset?.current_location || 'Not recorded')}</b></span>`;
     open.addEventListener('click', () => navigateToMapping(asset.id));
     card.append(open);
     const details = assetDetails(asset);
@@ -158,29 +255,64 @@ function assetDetails(asset) {
 }
 function renderMappings() {
   const container = $('mapping-list');
-  if (state.mappingLoading) {
-    container.replaceChildren(); container.classList.add('is-loading'); container.textContent = 'Loading confirmed mappings…';
-    $('mapping-count').textContent = 'Loading…';
+  renderMappingTotal();
+  if (state.mappingLoading || state.collectionsLoading || state.assetsLoading) {
+    renderLoadingCards(container, 'mapping', 'Loading mapping results...', 3);
+    setMappingPagerVisible(false);
     setPageControls('mapping', 0, 1, () => {}, () => {});
     return;
   }
-  const query = $('mapping-search').value.trim().toLowerCase(); const collection = $('mapping-collection').value;
-  const filtered = state.mappings.filter(mapping => { const asset = state.assets.find(item => item.id === mapping.itemit_item_id); return inCollection(asset, collection) && (!query || [itemName(asset), asset?.serial, mapping.model_key, mapping.ifc_global_id].some(value => String(value || '').toLowerCase().includes(query))); });
+  const hierarchy = state.hierarchy; const nodeId = selectedHierarchyNode(); const note = $('mapping-hierarchy-note');
+  if (!hierarchy?.roots.length) {
+    container.replaceChildren(); container.classList.remove('is-loading', 'soft-loading-list'); container.textContent = 'Collection hierarchy is unavailable, so category filtering cannot be applied.';
+    setMappingPagerVisible(false);
+    note.textContent = 'Collection hierarchy is unavailable. Confirmed mappings remain unclassified.';
+    setPageControls('mapping', 0, 1, () => {}, () => {});
+    return;
+  }
+  if (state.mappingError && !state.mappingsAvailable) {
+    container.replaceChildren(); container.classList.remove('is-loading', 'soft-loading-list');
+    const message = document.createElement('span'); message.textContent = 'Confirmed mappings could not be loaded.';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'tree-retry'; retry.textContent = 'Retry'; retry.addEventListener('click', () => void loadMappingData());
+    container.append(message, retry); $('mapping-count').textContent = 'Unavailable'; setMappingPagerVisible(false);
+    note.replaceChildren('Mapping status is unavailable. ', retry.cloneNode(true));
+    note.lastElementChild.addEventListener('click', () => void loadMappingData());
+    setPageControls('mapping', 0, 1, () => {}, () => {});
+    return;
+  }
+  if (!nodeId) {
+    renderMappingEmptyState('No category selected', 'Choose a category above to explore its confirmed mappings.');
+    setMappingPagerVisible(false);
+    setPageControls('mapping', 0, 1, () => {}, () => {});
+    return;
+  }
+  const query = $('mapping-search').value.trim().toLowerCase();
+  const filtered = mappingsForCollectionNode(nodeId).filter(mapping => {
+    const asset = state.assets.find(item => item.id === mapping.itemit_item_id);
+    return !query || [itemName(asset), asset?.serial, mapping.model_key, mapping.ifc_global_id].some(value => String(value || '').toLowerCase().includes(query));
+  });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); state.mappingPage = Math.min(state.mappingPage, totalPages - 1); const visible = filtered.slice(state.mappingPage * PAGE_SIZE, (state.mappingPage + 1) * PAGE_SIZE);
-  container.replaceChildren(); container.classList.remove('is-loading'); $('mapping-count').textContent = `${filtered.length} confirmed`;
-  if (!visible.length) container.textContent = state.mappingsAvailable ? 'No confirmed mappings match these filters.' : 'Confirmed mappings are currently unavailable.';
+  container.replaceChildren(); container.classList.remove('is-loading', 'soft-loading-list');
+  if (!state.collectionError) note.hidden = true;
+  if (!visible.length) {
+    renderMappingEmptyState(query ? 'No matching results' : 'No confirmed mappings', query ? 'Try a different search term.' : 'There are no confirmed mappings under this category.');
+    setMappingPagerVisible(false);
+  }
   for (const mapping of visible) {
     const asset = state.assets.find(item => item.id === mapping.itemit_item_id);
     const element = state.ifcElements.get(mapping.model_key)?.get(mapping.ifc_global_id);
     const ifcType = element?.ifcType || mapping.ifc_type || 'IFC type unavailable';
+    const ifcName = fullIfcDisplayName(mapping, element);
+    const displayName = mappingDisplayName(mapping, asset, element);
     const card = document.createElement('article'); card.className = 'mapping-row';
     const open = document.createElement('button'); open.className = 'mapping-row-main'; open.type = 'button'; open.title = 'Locate this confirmed mapping in the 3D model';
-    open.innerHTML = `<span class="mapping-section mapping-asset"><span class="card-heading"><span class="card-label">itemit asset</span><strong>${escapeHtml(itemName(asset))}</strong><em class="status-badge status-confirmed">Confirmed</em></span><span class="asset-field"><span>${escapeHtml(assetIdentifierLabel(asset))}</span><code>${escapeHtml(assetIdentifier(asset || { id: mapping.itemit_item_id }))}</code></span></span><span class="mapping-section mapping-ifc"><span class="card-label">Linked IFC element</span><strong>${escapeHtml(mappedIfcDisplayName(mapping, element))}</strong><span class="ifc-type">${escapeHtml(ifcType)}</span><span class="ifc-metadata"><span><b>Model</b>${escapeHtml(modelName(mapping.model_key))}</span><span><b>GlobalId</b><code>${escapeHtml(mapping.ifc_global_id)}</code></span></span></span>`;
+    open.innerHTML = `<span class="mapping-section mapping-summary"><span class="card-heading"><span class="card-label">Mapping display name</span><strong>${escapeHtml(displayName)}</strong><em class="status-badge status-confirmed">Confirmed</em></span></span><span class="mapping-section mapping-asset"><span class="card-label">Linked itemit asset</span><strong>${escapeHtml(itemName(asset))}</strong><span class="asset-field"><span>${escapeHtml(assetIdentifierLabel(asset || { id: mapping.itemit_item_id }))}</span><code>${escapeHtml(assetIdentifier(asset || { id: mapping.itemit_item_id }))}</code></span>${asset?.current_location ? `<span class="asset-field"><span>Location</span><b>${escapeHtml(asset.current_location)}</b></span>` : ''}</span><span class="mapping-section mapping-ifc"><span class="card-label">Linked IFC element</span><strong>${escapeHtml(ifcName || 'IFC name unavailable')}</strong><span class="ifc-type">${escapeHtml(ifcType)}</span><span class="ifc-metadata"><span><b>Model</b>${escapeHtml(modelName(mapping.model_key))}</span><span><b>GlobalId</b><code>${escapeHtml(mapping.ifc_global_id)}</code></span></span></span>`;
     const locate = document.createElement('button'); locate.className = 'locate-action'; locate.type = 'button'; locate.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path></svg><span>Locate in 3D</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg>`;
     const locateMapping = () => void focusMapping(mapping, asset);
     open.addEventListener('click', locateMapping); locate.addEventListener('click', locateMapping);
     card.append(open, locate); container.append(card);
   }
+  setMappingPagerVisible(filtered.length > PAGE_SIZE);
   setPageControls('mapping', state.mappingPage, totalPages, () => { state.mappingPage -= 1; renderMappings(); }, () => { state.mappingPage += 1; renderMappings(); });
 }
 async function focusMapping(mapping, asset) {
@@ -239,12 +371,12 @@ async function focusMapping(mapping, asset) {
   $('selected-element').textContent = `${itemName(asset)} ↔ ${mapping.ifc_global_id}`;
 }
 function navigateToMapping(assetId) {
-  const url = new URL('./', window.location.href);
+  const url = new URL('./asset-mapping.html', window.location.href);
   url.searchParams.set('asset_id', assetId);
   window.location.assign(url);
 }
 function navigateToIfcMapping({ modelKey, ifcGlobalId }) {
-  const url = new URL('./', window.location.href);
+  const url = new URL('./asset-mapping.html', window.location.href);
   url.searchParams.set('model_key', modelKey);
   url.searchParams.set('ifc_global_id', ifcGlobalId);
   window.location.assign(url);
@@ -276,33 +408,36 @@ function setSideTab(id) {
   for (const tab of document.querySelectorAll('[data-side-tab]')) { const active = tab.dataset.sideTab === id; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); }
 }
 function populateFilters() {
-  for (const collection of state.collections) { $('mapping-collection').add(new Option(collection.name, collection.id)); $('asset-collection').add(new Option(collection.name, collection.id)); }
-  mappingCollectionPicker.refresh(); assetCollectionPicker.refresh();
+  state.hierarchy = createCollectionHierarchy(state.collections);
+  if (state.mappingNodeId && state.mappingNodeId !== UNCLASSIFIED_NODE_ID && !state.hierarchy.nodes.has(state.mappingNodeId)) state.mappingNodeId = null;
+  if (state.assetNodeId && !state.hierarchy.nodes.has(state.assetNodeId)) state.assetNodeId = null;
+  renderCollectionTree(); renderAssetCollectionTree();
 }
 async function loadMappingData() {
-  state.mappingLoading = true; renderMappings();
-  try {
-    const [assetResult, collectionResult, mappingResult] = await Promise.allSettled([getAssets(), getCollections(), getMappings()]);
-    if (assetResult.status === 'fulfilled') state.assets = assetResult.value;
-    if (collectionResult.status === 'fulfilled') state.collections = collectionResult.value;
-    if (mappingResult.status === 'fulfilled') { state.mappings = mappingResult.value; state.mappingsAvailable = true; }
-    else state.mappingsAvailable = false;
-    if (assetResult.status === 'rejected') throw assetResult.reason;
-    if (collectionResult.status === 'rejected' || mappingResult.status === 'rejected') {
-      const unavailable = [collectionResult.status === 'rejected' && 'collections', mappingResult.status === 'rejected' && 'mappings'].filter(Boolean).join(' and ');
-      console.warn(`Loaded ${state.assets.length} assets, but ${unavailable} are unavailable.`, { collectionResult, mappingResult });
-    }
-    state.mappingLoading = false; populateFilters(); renderAssets(); renderMappings();
-    if (assetResult.status === 'fulfilled' && (collectionResult.status === 'rejected' || mappingResult.status === 'rejected')) {
-      status(`${$('model-status').textContent} - Assets loaded; some mapping data is unavailable.`);
-    }
-  } catch (error) {
-    // The 3D models are static GitHub Pages assets. Mapping data is optional
-    // because the production site has no local FastAPI proxy.
-    state.mappingLoading = false; console.warn('Mapping data is unavailable.', error);
-    renderAssets(); renderMappings();
-    status($('model-status').textContent + ' · Mapping data unavailable.');
+  await Promise.allSettled([loadInventoryAssets(), loadCollections(), loadMappingStatus()]);
+}
+async function loadInventoryAssets() {
+  state.assetsLoading = true; state.assetsError = null; renderAssets();
+  try { state.assets = await getAssets(); }
+  catch (error) { state.assetsError = error; console.warn('Itemit inventory is unavailable.', error); }
+  finally { state.assetsLoading = false; renderAssetCollectionTree(); renderAssets(); }
+}
+async function loadCollections() {
+  state.collectionsLoading = true; state.collectionError = null; renderCollectionTree(); renderAssetCollectionTree();
+  try { state.collections = await getCollections(); state.hierarchy = createCollectionHierarchy(state.collections); }
+  catch (error) { state.collectionError = error; console.warn('Itemit collection hierarchy is unavailable.', error); }
+  finally {
+    state.collectionsLoading = false;
+    if (state.mappingNodeId && state.mappingNodeId !== UNCLASSIFIED_NODE_ID && !state.hierarchy?.nodes.has(state.mappingNodeId)) state.mappingNodeId = null;
+    if (state.assetNodeId && !state.hierarchy?.nodes.has(state.assetNodeId)) state.assetNodeId = null;
+    renderCollectionTree(); renderAssetCollectionTree(); renderAssets(); renderMappings();
   }
+}
+async function loadMappingStatus() {
+  state.mappingLoading = true; state.mappingError = null; renderCollectionTree(); renderAssets(); renderMappings();
+  try { state.mappings = await getMappings(); state.mappingsAvailable = true; }
+  catch (error) { state.mappingError = error; state.mappingsAvailable = false; console.warn('Confirmed mapping status is unavailable.', error); }
+  finally { state.mappingLoading = false; renderCollectionTree(); renderAssetCollectionTree(); renderAssets(); renderMappings(); }
 }
 async function loadIfcMetadata() {
   try {
@@ -330,10 +465,38 @@ async function handleViewerSelection(model, localId) {
   setSideTab('assets-pane'); renderAssets();
 }
 async function start() {
+  initializeAssetInventoryPanel();
   catalog.forEach(model => $('model-select').add(new Option(model.name, model.key))); modelPicker.refresh();
   $('model-select').addEventListener('change', () => { clearIfcContext(); void switchModel($('model-select').value); });
-  $('asset-search').addEventListener('input', () => { state.assetPage = 0; renderAssets(); }); $('asset-collection').addEventListener('change', () => { state.assetPage = 0; renderAssets(); });
-  $('mapping-search').addEventListener('input', () => { state.mappingPage = 0; renderMappings(); }); $('mapping-collection').addEventListener('change', () => { state.mappingPage = 0; renderMappings(); });
+  $('asset-search').addEventListener('input', () => { state.assetPage = 0; renderAssets(); });
+  $('asset-tree-trigger').addEventListener('click', () => {
+    if (state.mappingLoading || !$('asset-tree').childElementCount) return;
+    const popover = $('asset-tree-popover'); popover.hidden = !popover.hidden; $('asset-tree-trigger').setAttribute('aria-expanded', String(!popover.hidden));
+    if (!popover.hidden) requestAnimationFrame(() => ($('asset-tree').querySelector('[aria-selected="true"]') || $('asset-tree').querySelector('.asset-tree-node-label'))?.focus());
+  });
+  $('asset-tree-expand').addEventListener('click', () => { state.expandedAssetCollectionIds = new Set(state.hierarchy?.nodes.keys() || []); renderAssetCollectionTree(); });
+  $('asset-tree-collapse').addEventListener('click', () => { state.expandedAssetCollectionIds.clear(); renderAssetCollectionTree(); });
+  $('asset-tree-clear').addEventListener('click', () => { state.assetNodeId = null; state.assetPage = 0; $('asset-tree-popover').hidden = true; $('asset-tree-trigger').setAttribute('aria-expanded', 'false'); renderAssetCollectionTree(); renderAssets(); });
+  $('mapping-search').addEventListener('input', () => { state.mappingPage = 0; renderMappings(); });
+  $('mapping-tree-trigger').addEventListener('click', () => {
+    if (state.mappingLoading || !$('mapping-tree').childElementCount) return;
+    const popover = $('mapping-tree-popover'); popover.hidden = !popover.hidden;
+    $('mapping-tree-trigger').setAttribute('aria-expanded', String(!popover.hidden));
+    if (!popover.hidden) requestAnimationFrame(() => ($('mapping-tree').querySelector('[aria-selected="true"]') || $('mapping-tree').querySelector('.tree-node-label'))?.focus());
+  });
+  $('mapping-tree-expand').addEventListener('click', () => { state.expandedCollectionIds = new Set(state.hierarchy?.nodes.keys() || []); renderCollectionTree(); });
+  $('mapping-tree-collapse').addEventListener('click', () => { state.expandedCollectionIds.clear(); renderCollectionTree(); });
+  $('mapping-tree-clear').addEventListener('click', () => { state.mappingNodeId = null; state.mappingPage = 0; $('mapping-tree-popover').hidden = true; $('mapping-tree-trigger').setAttribute('aria-expanded', 'false'); renderCollectionTree(); renderMappings(); });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (!$('mapping-tree-popover').hidden) { $('mapping-tree-popover').hidden = true; $('mapping-tree-trigger').setAttribute('aria-expanded', 'false'); $('mapping-tree-trigger').focus(); }
+    if (!$('asset-tree-popover').hidden) { $('asset-tree-popover').hidden = true; $('asset-tree-trigger').setAttribute('aria-expanded', 'false'); $('asset-tree-trigger').focus(); }
+  });
+  document.addEventListener('pointerdown', event => {
+    const mappingFilter = document.querySelector('.collection-tree-filter'); const assetFilter = document.querySelector('.asset-collection-filter');
+    if (mappingFilter && !mappingFilter.contains(event.target) && !$('mapping-tree-popover').hidden) { $('mapping-tree-popover').hidden = true; $('mapping-tree-trigger').setAttribute('aria-expanded', 'false'); }
+    if (assetFilter && !assetFilter.contains(event.target) && !$('asset-tree-popover').hidden) { $('asset-tree-popover').hidden = true; $('asset-tree-trigger').setAttribute('aria-expanded', 'false'); }
+  });
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => void setView(button.dataset.view))); document.querySelectorAll('[data-side-tab]').forEach(button => button.addEventListener('click', () => setSideTab(button.dataset.sideTab)));
   $('export-mappings-csv').addEventListener('click', async () => {
     const button = $('export-mappings-csv'); button.disabled = true; button.setAttribute('aria-busy', 'true');
@@ -348,7 +511,7 @@ async function start() {
     await loadIfcMetadata();
     state.viewer = await createIfcViewer($('viewer'));
     state.picker = setupModelPicker({ viewer: state.viewer, getActiveModel: () => state.models.get(state.activeKey), onSelected: (model, localId) => { void handleViewerSelection(model, localId); } });
-    renderAssets(); renderMappings();
+    renderCollectionTree(); renderAssetCollectionTree(); renderAssets(); renderMappings();
     await switchModel('building');
     void loadMappingData();
   } catch (error) {

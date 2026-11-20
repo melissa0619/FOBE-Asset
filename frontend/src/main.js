@@ -7,11 +7,11 @@ import { makeSearchableSelect } from './searchable-select.js';
 const $ = id => document.getElementById(id);
 const refreshMetadata = document.createElement('p');
 refreshMetadata.className = 'index-state';
-refreshMetadata.textContent = 'Inventory not refreshed';
+refreshMetadata.textContent = 'Loading inventory data...';
 document.querySelector('.header-metadata').append(refreshMetadata);
-const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'batch-progress', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data'].map(id => [id, $(id)]));
+const els = Object.fromEntries(['model', 'ifc-query', 'ifc-scope', 'ifc-status', 'ifc-filter-toggle', 'ifc-filter-panel', 'ifc-list', 'ifc-count', 'ifc-previous', 'ifc-next', 'ifc-page', 'clear-ifc-filters', 'single-mode', 'batch-mode', 'mode-label', 'select-visible', 'select-visible-label', 'review-empty', 'review-loading', 'single-review', 'review-guidance', 'ifc-card', 'asset-card', 'batch-queue', 'batch-progress', 'assign', 'confirm', 'unmap', 'clear-batch', 'asset-query', 'location', 'collection', 'asset-status', 'asset-filter-toggle', 'asset-filter-panel', 'clear-asset-filters', 'active-filters', 'asset-list', 'asset-count', 'previous', 'next', 'page', 'message', 'index-state', 'refresh-data', 'refresh-indicator'].map(id => [id, $(id)]));
 ['model', 'ifc-scope', 'ifc-status', 'location', 'collection', 'asset-status'].forEach(id => makeSearchableSelect(els[id], { placeholder: 'Choose an option', searchable: false }));
-const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, mappingsAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false, isRefreshing: false };
+const state = { indexes: new Map(), assets: [], collections: [], mappings: [], mode: 'single', selectedIfc: null, selectedAsset: null, batch: [], apiAvailable: false, mappingsAvailable: false, page: 0, ifcPage: 0, locationFilterSource: 'auto', editingDisplayName: false, isSubmitting: false, isUnmapping: false, isRefreshing: false, ifcLoading: false, ifcRefreshing: false, assetsLoading: true, mappingsLoading: true, ifcLoaded: false, assetsLoaded: false, mappingsLoaded: false, ifcError: null, assetsError: null, collectionsError: null, mappingsError: null, lastInventoryRefresh: null };
 const runMappingSubmission = createSubmissionGuard();
 const runUnmapping = createSubmissionGuard();
 const PAGE_SIZE = 25;
@@ -26,8 +26,30 @@ const isConfirmed = element => Boolean(mappingFor(element));
 const isAvailableForNewMapping = element => !isExcludedIfcEntity(element?.ifcType);
 
 function message(value = '', tone = '') { els.message.textContent = value; els.message.className = `message ${tone}`; }
+function setInventoryStatus(text, { loading = false, retry = false } = {}) {
+  refreshMetadata.replaceChildren();
+  if (loading) { const spinner = document.createElement('span'); spinner.className = 'inventory-status-spinner'; spinner.setAttribute('aria-hidden', 'true'); refreshMetadata.append(spinner); }
+  refreshMetadata.append(document.createTextNode(text));
+  if (retry) { const button = retryButton('inventory data', () => void refreshWorkspace()); button.classList.add('inventory-status-retry'); refreshMetadata.append(button); }
+}
+function updateInventoryStatus() {
+  const loading = state.ifcLoading || state.assetsLoading || state.mappingsLoading || state.isRefreshing;
+  if (loading) { setInventoryStatus('Loading inventory data...', { loading: true }); return; }
+  if (state.ifcError || state.assetsError || state.collectionsError || state.mappingsError) { setInventoryStatus('Unable to refresh inventory', { retry: true }); return; }
+  if (state.lastInventoryRefresh) setInventoryStatus(`Last updated ${formatRefreshedAt(state.lastInventoryRefresh)}`);
+}
+function retryButton(label, action) { const button = document.createElement('button'); button.type = 'button'; button.className = 'loading-retry'; button.textContent = 'Retry'; button.setAttribute('aria-label', `Retry ${label}`); button.addEventListener('click', action); return button; }
+function renderLoadingList(node) { node.replaceChildren(); }
 function escape(value) { const node = document.createElement('span'); node.textContent = String(value); return node.innerHTML; }
-function elementName(element) { return String(element?.name || 'Unnamed IFC element').split(':')[0].replace(/\s*\([^)]*\)\s*/g, ' ').trim() || 'Unnamed IFC element'; }
+// IFC labels are source data: preserve them exactly, including colons,
+// parenthetical text, and whitespace used by the originating model.
+function elementName(element) { return element?.name || 'Unnamed IFC element'; }
+function mappingDisplayName(mapping, element) {
+  const ifcName = elementName(element);
+  const stored = typeof mapping?.display_name === 'string' ? mapping.display_name : '';
+  if (element?.name && mapping?.display_name_source === 'AUTO' && stored.trim() === ifcName.trim()) return ifcName;
+  return stored.trim() ? stored : ifcName;
+}
 function shortId(value) { const source = String(value || ''); return source.length > 14 ? `${source.slice(0, 8)}…${source.slice(-5)}` : source || 'Not available'; }
 function formatIfcType(value) {
   const names = { BUILDINGELEMENTPROXY: 'Building Element Proxy', FURNISHINGELEMENT: 'Furnishing Element', FURNITURETYPE: 'Furniture Type', WALLSTANDARDCASE: 'Wall Standard Case', BUILDINGELEMENTPROXYTYPE: 'Building Element Proxy Type', FLOWTERMINAL: 'Flow Terminal', LIGHTFIXTURE: 'Light Fixture', CURTAINWALL: 'Curtain Wall', BUILDINGSTOREY: 'Building Storey' };
@@ -45,14 +67,14 @@ function refreshConfirm() {
   const active = state.mode === 'batch' ? state.batch.filter(row => row.asset && !isConfirmed(row.element) && isAvailableForNewMapping(row.element)) : state.selectedIfc && state.selectedAsset && !isConfirmed(state.selectedIfc) && isAvailableForNewMapping(state.selectedIfc) ? [{ element: state.selectedIfc, asset: state.selectedAsset }] : [];
   // Inventory can be read without Firestore, but mapping writes require a
   // successful mapping read so existing confirmed mappings remain protected.
-  els.confirm.disabled = state.isSubmitting || state.isUnmapping || !state.apiAvailable || !state.mappingsAvailable || active.length === 0;
+  els.confirm.disabled = state.isRefreshing || state.isSubmitting || state.isUnmapping || !state.apiAvailable || !state.mappingsAvailable || active.length === 0;
   els.confirm.textContent = state.isSubmitting ? 'Confirming...' : state.mode === 'batch' ? `Confirm batch (${active.length})` : 'Confirm mapping';
   els.confirm.setAttribute('aria-busy', String(state.isSubmitting));
   els.assign.hidden = state.mode !== 'batch';
   els.assign.disabled = state.mode !== 'batch' || !state.selectedAsset || !state.batch.some(entry => keyOf(entry.element) === keyOf(state.selectedIfc));
   const mapped = state.selectedIfc && mappingFor(state.selectedIfc);
   els.unmap.hidden = !mapped;
-  els.unmap.disabled = !mapped || state.isUnmapping || state.isSubmitting || !state.apiAvailable || !state.mappingsAvailable;
+  els.unmap.disabled = !mapped || state.isRefreshing || state.isUnmapping || state.isSubmitting || !state.apiAvailable || !state.mappingsAvailable;
   els.unmap.textContent = state.isUnmapping ? 'Unmapping...' : 'Unmap';
   els.unmap.setAttribute('aria-busy', String(state.isUnmapping));
 }
@@ -74,7 +96,7 @@ function renderDisplayName() {
   if (!view || !editor) return;
   view.hidden = !visible || state.editingDisplayName; editor.hidden = !visible || !state.editingDisplayName;
   if (!visible) return;
-  document.getElementById('display-name-value').textContent = text(mapped.display_name);
+  document.getElementById('display-name-value').textContent = mappingDisplayName(mapped, state.selectedIfc);
   if (state.editingDisplayName) document.getElementById('display-name-input').value = mapped.display_name || '';
 }
 function elementsForCurrentModel() { return state.indexes.get(els.model.value)?.elements || []; }
@@ -90,6 +112,8 @@ function eligibleIfc(element) {
   return !query || [element.name, element.ifcType, element.tag, identity(element)?.globalId].some(value => String(value || '').toLowerCase().includes(query));
 }
 function renderIfcList() {
+  if (state.ifcLoading && !state.ifcLoaded) { renderLoadingList(els['ifc-list']); els['ifc-count'].textContent = ''; els['ifc-page'].textContent = ''; els['ifc-previous'].disabled = true; els['ifc-next'].disabled = true; return; }
+  if (state.ifcError && !state.ifcLoaded) { els['ifc-list'].replaceChildren(); const error = document.createElement('div'); error.className = 'load-error'; error.append(document.createTextNode('Unable to load IFC elements.'), retryButton('IFC elements', () => void loadIfcData())); els['ifc-list'].append(error); els['ifc-count'].textContent = 'Unavailable'; els['ifc-page'].textContent = ''; els['ifc-previous'].disabled = true; els['ifc-next'].disabled = true; return; }
   const elements = elementsForCurrentModel().filter(eligibleIfc); const totalPages = Math.max(1, Math.ceil(elements.length / PAGE_SIZE)); state.ifcPage = Math.min(state.ifcPage, totalPages - 1); const pageElements = elements.slice(state.ifcPage * PAGE_SIZE, (state.ifcPage + 1) * PAGE_SIZE);
   els['ifc-list'].replaceChildren(); els['ifc-count'].textContent = `${elements.length} shown`; els['ifc-page'].textContent = `Page ${state.ifcPage + 1} of ${totalPages}`; els['ifc-previous'].disabled = state.ifcPage === 0; els['ifc-next'].disabled = state.ifcPage >= totalPages - 1;
   const eligible = pageElements.filter(element => !isConfirmed(element));
@@ -117,6 +141,8 @@ function assetMatches(asset) {
   return !status || (status === 'CONFIRMED' ? linked : !linked);
 }
 function renderAssets() {
+  if (state.assetsLoading && !state.assetsLoaded) { renderLoadingList(els['asset-list']); els['asset-count'].textContent = ''; els.page.textContent = ''; els.previous.disabled = true; els.next.disabled = true; return; }
+  if (state.assetsError && !state.assetsLoaded) { els['asset-list'].replaceChildren(); const error = document.createElement('div'); error.className = 'load-error'; error.append(document.createTextNode('Unable to load itemit assets.'), retryButton('itemit assets', () => void refreshData({ announce: false }))); els['asset-list'].append(error); els['asset-count'].textContent = 'Unavailable'; els.page.textContent = ''; els.previous.disabled = true; els.next.disabled = true; return; }
   const assets = state.assets.filter(assetMatches); const totalPages = Math.max(1, Math.ceil(assets.length / PAGE_SIZE)); state.page = Math.min(state.page, totalPages - 1); const pageAssets = assets.slice(state.page * PAGE_SIZE, (state.page + 1) * PAGE_SIZE);
   els['asset-list'].replaceChildren(); els['asset-count'].textContent = `${assets.length} available`; els.page.textContent = `Page ${state.page + 1} of ${totalPages}`; els.previous.disabled = state.page === 0; els.next.disabled = state.page >= totalPages - 1;
   const assetFilterActive = Boolean(els['asset-query'].value || els.location.value || els.collection.value || els['asset-status'].value); els['clear-asset-filters'].hidden = !assetFilterActive; els['active-filters'].textContent = assetFilterActive ? [els.location.value && `Location: ${els.location.options[els.location.selectedIndex].text}`, els.collection.value && `Collection: ${els.collection.options[els.collection.selectedIndex].text}`, els['asset-status'].value && `State: ${els['asset-status'].value}`].filter(Boolean).join(' · ') : '';
@@ -152,7 +178,10 @@ function render() {
   const single = state.mode === 'single'; const hasIfc = Boolean(state.selectedIfc); const hasAsset = Boolean(state.selectedAsset); const showPairPreview = single && (hasIfc || hasAsset);
   const lockNotice = document.querySelector('.mapping-lock-notice');
   if (lockNotice) lockNotice.textContent = mappingFor(state.selectedIfc) ? 'Unmap this confirmed relationship before choosing a replacement asset.' : '';
-  els['single-review'].classList.toggle('batch-pair-preview', !single); els['single-review'].classList.toggle('single-sided-review', hasIfc !== hasAsset); els['single-review'].hidden = !showPairPreview; els['review-empty'].hidden = !single || hasIfc || hasAsset; els['review-guidance'].hidden = !single || !(hasIfc !== hasAsset); els['review-guidance'].textContent = hasIfc ? 'Now select an itemit asset to complete this pair.' : 'Now select an IFC element to complete this pair.';
+  const workspaceLoading = state.ifcLoading || state.assetsLoading || state.mappingsLoading;
+  const mappingUnavailable = state.mappingsError && !state.mappingsLoaded;
+  els['review-loading'].hidden = true;
+  els['single-review'].classList.toggle('batch-pair-preview', !single); els['single-review'].classList.toggle('single-sided-review', hasIfc !== hasAsset); els['single-review'].hidden = workspaceLoading || mappingUnavailable || !showPairPreview; els['review-empty'].hidden = workspaceLoading || mappingUnavailable || !single || hasIfc || hasAsset; els['review-guidance'].hidden = workspaceLoading || mappingUnavailable || !single || !(hasIfc !== hasAsset); els['review-guidance'].textContent = hasIfc ? 'Now select an itemit asset to complete this pair.' : 'Now select an IFC element to complete this pair.';
   if (showPairPreview) { renderIfcCard(); renderAssetCard(); }
   renderIfcList(); renderAssets(); renderBatch(); renderDisplayName(); refreshConfirm();
 }
@@ -256,40 +285,67 @@ function populateFilters() {
   if ([...els.location.options].some(option => option.value === currentLocation)) els.location.value = currentLocation;
   if ([...els.collection.options].some(option => option.value === currentCollection)) els.collection.value = currentCollection;
 }
+function indexedElement(element, indexes = state.indexes) {
+  const id = identity(element);
+  return id && indexes.get(id.modelKey)?.elements.find(candidate => identity(candidate)?.globalId === id.globalId);
+}
+function restoreIfcSelections(indexes) {
+  const selected = indexedElement(state.selectedIfc, indexes);
+  state.selectedIfc = selected || null;
+  state.batch = state.batch.map(entry => ({ ...entry, element: indexedElement(entry.element, indexes) })).filter(entry => entry.element);
+}
+async function loadIfcData({ refresh = false } = {}) {
+  if (state.ifcLoading || state.ifcRefreshing) return;
+  const initial = !state.ifcLoaded;
+  state.ifcLoading = initial; state.ifcRefreshing = refresh && !initial; state.ifcError = null; render();
+  try {
+    const { manifest, indexes } = await loadIfcIndexes(undefined, { forceRefresh: refresh });
+    const currentModel = els.model.value;
+    state.indexes = indexes; state.ifcLoaded = true; restoreIfcSelections(indexes);
+    const mappingModels = manifest.models.filter(model => model.key !== 'building');
+    els.model.replaceChildren();
+    for (const model of mappingModels) els.model.add(new Option(model.name || model.key, model.key));
+    if ([...els.model.options].some(option => option.value === currentModel)) els.model.value = currentModel;
+    els['index-state'].textContent = `${mappingModels.length} mapping models · Indexed ${formatIndexedAt(manifest.generatedAt)}`;
+  } catch (error) {
+    state.ifcError = error; els['index-state'].textContent = 'IFC index unavailable'; message(error.message || 'Unable to load IFC elements.', 'error');
+  } finally { state.ifcLoading = false; state.ifcRefreshing = false; updateInventoryStatus(); render(); }
+}
 async function refreshData({ announce = true } = {}) {
   if (state.isRefreshing) return;
   state.isRefreshing = true;
   const selectedAssetId = state.selectedAsset?.id;
-  els['refresh-data'].disabled = true; els['refresh-data'].setAttribute('aria-busy', 'true');
-  if (announce) message('Refreshing inventory, collections, and mappings…');
+  els['refresh-data'].disabled = true; els['refresh-data'].setAttribute('aria-busy', 'true'); els['refresh-data'].textContent = 'Refresh data'; els['refresh-indicator'].hidden = true;
+  state.assetsLoading = !state.assetsLoaded; state.mappingsLoading = !state.mappingsLoaded; state.assetsError = null; state.collectionsError = null; state.mappingsError = null; updateInventoryStatus(); render();
+  if (announce) message();
   try {
   const [assetResult, collectionResult, mappingResult] = await Promise.allSettled([getAssets(), getCollections(), getMappings()]);
   if (assetResult.status === 'rejected') {
-    state.apiAvailable = false;
+    state.assetsError = assetResult.reason; state.apiAvailable = state.assetsLoaded;
     message(assetResult.reason.message || 'Unable to retrieve itemit assets.', 'error');
-    render();
   } else {
     const assets = assetResult.value;
-    state.assets = assets;
+    state.assets = assets; state.assetsLoaded = true;
     state.apiAvailable = true;
-    const refreshed = `Last updated ${formatRefreshedAt(new Date())}`;
-    els['refresh-data'].title = refreshed;
-    refreshMetadata.textContent = refreshed;
     if (selectedAssetId) state.selectedAsset = assets.find(asset => asset.id === selectedAssetId) || null;
     state.batch.forEach(entry => { if (entry.asset) entry.asset = assets.find(asset => asset.id === entry.asset.id) || entry.asset; });
     const unavailable = [];
     if (collectionResult.status === 'fulfilled') state.collections = collectionResult.value;
-    else { state.collections = []; unavailable.push(`collections: ${collectionResult.reason.message}`); }
-    if (mappingResult.status === 'fulfilled') { state.mappings = mappingResult.value; state.mappingsAvailable = true; }
-    else { state.mappingsAvailable = false; unavailable.push(`mappings: ${mappingResult.reason.message}`); }
-    populateFilters(); render();
+    else { state.collectionsError = collectionResult.reason; unavailable.push(`collections: ${collectionResult.reason.message}`); }
+    if (mappingResult.status === 'fulfilled') { state.mappings = mappingResult.value; state.mappingsAvailable = true; state.mappingsLoaded = true; }
+    else { state.mappingsError = mappingResult.reason; state.mappingsAvailable = state.mappingsLoaded; unavailable.push(`mappings: ${mappingResult.reason.message}`); }
+    populateFilters();
     if (unavailable.length) message(`Loaded ${assets.length} itemit assets. Some mapping data is unavailable (${unavailable.join('; ')}).`, 'error');
-    else if (announce) message(`Updated ${assets.length} itemit assets, ${state.collections.length} collections, and ${state.mappings.length} mappings.`, 'success');
+    else { state.lastInventoryRefresh = new Date(); els['refresh-data'].title = `Last updated ${formatRefreshedAt(state.lastInventoryRefresh)}`; if (announce) { message('Data refreshed successfully', 'success'); setTimeout(() => { if (els.message.textContent === 'Data refreshed successfully') message(); }, 3000); } }
   }
   } finally {
-    state.isRefreshing = false;
-    els['refresh-data'].disabled = false; els['refresh-data'].setAttribute('aria-busy', 'false');
+    state.isRefreshing = false; state.assetsLoading = false; state.mappingsLoading = false;
+    els['refresh-data'].disabled = false; els['refresh-data'].setAttribute('aria-busy', 'false'); els['refresh-data'].textContent = 'Refresh data'; els['refresh-indicator'].hidden = true; updateInventoryStatus();
+    render();
   }
+}
+async function refreshWorkspace() {
+  await Promise.all([loadIfcData({ refresh: true }), refreshData()]);
 }
 async function preselectRequestedAsset() {
   const assetId = new URLSearchParams(window.location.search).get('asset_id');
@@ -320,9 +376,16 @@ async function preselectRequestedIfc() {
   window.history.replaceState({}, '', url);
 }
 async function start() {
+  const ifcRequest = loadIfcData();
+  const inventoryRequest = refreshData({ announce: false });
+  await Promise.all([ifcRequest, inventoryRequest]);
+  await preselectRequestedAsset();
+  await preselectRequestedIfc();
+  render();
+  return;
   try { const { manifest, indexes } = await loadIfcIndexes(); state.indexes = indexes; const mappingModels = manifest.models.filter(model => model.key !== 'building'); for (const model of mappingModels) els.model.add(new Option(model.name || model.key, model.key)); els['index-state'].textContent = `${mappingModels.length} mapping models · Indexed ${formatIndexedAt(manifest.generatedAt)}`; }
   catch (error) { els['index-state'].textContent = 'IFC index required'; message(error.message, 'error'); return; }
-  await refreshData({ announce: false });
+  await Promise.all([ifcRequest, inventoryRequest]);
   await preselectRequestedAsset();
   await preselectRequestedIfc();
   render();
@@ -340,10 +403,10 @@ els['ifc-previous'].addEventListener('click', () => { state.ifcPage -= 1; render
 els['previous'].addEventListener('click', () => { state.page -= 1; renderAssets(); }); els.next.addEventListener('click', () => { state.page += 1; renderAssets(); });
 els['clear-ifc-filters'].addEventListener('click', () => { els['ifc-query'].value = ''; els['ifc-scope'].value = 'likely'; els['ifc-status'].value = ''; state.ifcPage = 0; els['clear-ifc-filters'].hidden = true; render(); });
 els['clear-asset-filters'].addEventListener('click', () => { els['asset-query'].value = ''; els.location.value = ''; els.collection.value = ''; els['asset-status'].value = ''; state.locationFilterSource = 'user'; state.page = 0; render(); });
-els['refresh-data'].addEventListener('click', () => { void refreshData(); });
+els['refresh-data'].addEventListener('click', () => { void refreshWorkspace(); });
 els.confirm.addEventListener('click', confirmMappings);
 els.unmap.addEventListener('click', unmapSelectedMapping);
 document.getElementById('edit-display-name').addEventListener('click', () => { state.editingDisplayName = true; render(); document.getElementById('display-name-input').focus(); });
 document.getElementById('cancel-display-name').addEventListener('click', () => { state.editingDisplayName = false; render(); });
-document.getElementById('display-name-editor').addEventListener('submit', async event => { event.preventDefault(); const mapped = state.selectedIfc && mappingFor(state.selectedIfc); const input = document.getElementById('display-name-input'); const value = input.value.trim(); if (!mapped || !value) { message('Display name cannot be empty.', 'error'); return; } const save = document.getElementById('save-display-name'); save.disabled = true; save.textContent = 'Saving…'; try { const updated = await updateDisplayName({ model_key: mapped.model_key, ifc_global_id: mapped.ifc_global_id, display_name: value }); const index = state.mappings.findIndex(row => row.model_key === updated.model_key && row.ifc_global_id === updated.ifc_global_id); if (index >= 0) state.mappings[index] = updated; state.editingDisplayName = false; message('Display name saved.', 'success'); } catch (error) { message(error.message, 'error'); } finally { save.textContent = 'Save'; render(); } });
+document.getElementById('display-name-editor').addEventListener('submit', async event => { event.preventDefault(); const mapped = state.selectedIfc && mappingFor(state.selectedIfc); const input = document.getElementById('display-name-input'); const value = input.value; if (!mapped || !value.trim()) { message('Display name cannot be empty.', 'error'); return; } const save = document.getElementById('save-display-name'); save.disabled = true; save.textContent = 'Saving…'; try { const updated = await updateDisplayName({ model_key: mapped.model_key, ifc_global_id: mapped.ifc_global_id, display_name: value }); const index = state.mappings.findIndex(row => row.model_key === updated.model_key && row.ifc_global_id === updated.ifc_global_id); if (index >= 0) state.mappings[index] = updated; state.editingDisplayName = false; message('Display name saved.', 'success'); } catch (error) { message(error.message, 'error'); } finally { save.textContent = 'Save'; render(); } });
 void start();

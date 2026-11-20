@@ -11,6 +11,10 @@ export function mappingForIfc(mappings, modelKey, ifcGlobalId) {
 }
 
 export function mappedIfcDisplayName(mapping, indexedElement) {
-  const stored = typeof mapping?.display_name === 'string' ? mapping.display_name.trim() : '';
-  return stored || indexedElement?.name || indexedElement?.globalId || mapping?.ifc_global_id || 'Unnamed IFC element';
+  const ifcName = indexedElement?.name;
+  const stored = typeof mapping?.display_name === 'string' ? mapping.display_name : '';
+  // Automatic display-name selection compares normalized values. If it selected
+  // the IFC source, display the original indexed name without rewriting it.
+  if (ifcName && mapping?.display_name_source === 'AUTO' && stored.trim() === ifcName.trim()) return ifcName;
+  return stored.trim() ? stored : ifcName || indexedElement?.globalId || mapping?.ifc_global_id || 'Unnamed IFC element';
 }

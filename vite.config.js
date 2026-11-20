@@ -8,7 +8,7 @@ const gatewayTarget = process.env.FOBE_NODE_RED_TARGET || 'http://127.0.0.1:1880
 const repositoryRoot = import.meta.dirname;
 
 export default defineConfig({
-  base: '/FOBE-Asset/',
+  base: '/AssetManagement/',
   root: resolve(repositoryRoot, 'frontend'),
   // Keep the frontend source under frontend/ while loading the shared local
   // environment file from the repository root.
@@ -23,8 +23,8 @@ export default defineConfig({
     copyPublicDir: false,
     rollupOptions: {
       input: {
-        mapping: resolve(repositoryRoot, 'frontend', 'index.html'),
-        modelView: resolve(repositoryRoot, 'frontend', 'model-view.html')
+        modelView: resolve(repositoryRoot, 'frontend', 'index.html'),
+        mapping: resolve(repositoryRoot, 'frontend', 'asset-mapping.html')
       },
       output: {
         entryFileNames: 'assets/[name]-[hash].js',

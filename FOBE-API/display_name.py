@@ -7,19 +7,20 @@ def _trim(value) -> str:
     return str(value or "").strip()
 
 
-def ifc_comparison_name(value) -> str:
-    """Use the human IFC label before Revit-style colon-qualified details."""
-    text = _trim(value)
-    return text.split(":", 1)[0].strip() or text
+def _source_name(value) -> str:
+    """Return a source label without altering its contents."""
+    return value if isinstance(value, str) else str(value or "")
 
 
 def default_display_name(ifc_name, itemit_name) -> str:
-    """Choose the shortest trimmed source name; ties intentionally prefer IFC."""
-    ifc = ifc_comparison_name(ifc_name)
-    itemit = _trim(itemit_name)
-    if ifc and itemit:
+    """Choose the shortest original source name; ties prefer IFC."""
+    # Source labels are persisted as supplied. We only inspect whitespace to
+    # reject blank values; no trimming or colon-based filtering is applied.
+    ifc = _source_name(ifc_name)
+    itemit = _source_name(itemit_name)
+    if ifc.strip() and itemit.strip():
         return ifc if len(ifc) <= len(itemit) else itemit
-    return ifc or itemit or FALLBACK_DISPLAY_NAME
+    return ifc if ifc.strip() else itemit if itemit.strip() else FALLBACK_DISPLAY_NAME
 
 
 def _previous_default_display_name(ifc_name, itemit_name) -> str:
@@ -32,11 +33,11 @@ def _previous_default_display_name(ifc_name, itemit_name) -> str:
 
 def resolved_display_name(mapping, ifc_name, itemit_name) -> str:
     """Use CUSTOM labels verbatim; safely refresh known automatic defaults."""
-    stored = _trim(mapping.get("display_name"))
+    stored = _source_name(mapping.get("display_name"))
     source = mapping.get("display_name_source")
     if source == "CUSTOM":
-        return stored or default_display_name(ifc_name, itemit_name)
-    if source == "AUTO" or not stored:
+        return stored if stored.strip() else default_display_name(ifc_name, itemit_name)
+    if source == "AUTO" or not stored.strip():
         return default_display_name(ifc_name, itemit_name)
     # Legacy documents predate provenance. Only recognize a value as automatic
     # when it exactly matches the old algorithm and has never been updated.

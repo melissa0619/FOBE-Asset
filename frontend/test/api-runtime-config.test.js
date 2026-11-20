@@ -5,7 +5,7 @@ import { createApiClient, createRuntimeConfigResolver, FobeApiError, normalizeAp
 const validConfig = apiBaseUrl => ({ schemaVersion: 1, apiBaseUrl, updatedAt: '2026-11-16T12:00:00.000Z' });
 
 test('runtime config resolves beneath the GitHub Pages base path', () => {
-  assert.equal(runtimeConfigUrl('/FOBE-Asset/'), '/FOBE-Asset/config/backend.json');
+  assert.equal(runtimeConfigUrl('/AssetManagement/'), '/AssetManagement/config/backend.json');
   assert.equal(runtimeConfigUrl('/'), '/config/backend.json');
 });
 
@@ -18,7 +18,7 @@ test('runtime config accepts only an absolute HTTPS /api endpoint', () => {
 
 test('production resolver caches valid configuration and reports missing configuration', async () => {
   let calls = 0; let now = 1;
-  const resolver = createRuntimeConfigResolver({ basePath: '/FOBE-Asset/', now: () => now, fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(validConfig('https://one.trycloudflare.com/api'))); } });
+  const resolver = createRuntimeConfigResolver({ basePath: '/AssetManagement/', now: () => now, fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(validConfig('https://one.trycloudflare.com/api'))); } });
   assert.equal(await resolver.resolve(), 'https://one.trycloudflare.com/api');
   now += 1;
   assert.equal(await resolver.resolve(), 'https://one.trycloudflare.com/api');

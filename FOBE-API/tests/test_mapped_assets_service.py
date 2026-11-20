@@ -129,15 +129,17 @@ def test_display_name_selection_and_legacy_dataframe_fallback(tmp_path):
     assert default_display_name("Long IFC Asset", "Desk") == "Desk"
     assert default_display_name("Desk", "Long itemit asset") == "Desk"
     assert default_display_name("Same", "Size") == "Same"  # IFC wins ties.
-    assert default_display_name("  ", " Item ") == "Item"
+    assert default_display_name("  ", " Item ") == " Item "
     assert default_display_name(None, None) == FALLBACK_DISPLAY_NAME
 
-    # IFC index labels may have Revit-style colon-qualified details.  Compare
-    # the same human label the Mapping Review UI presents to users.
+    # Compare complete source labels. Colon-qualified IFC names must not be
+    # shortened or otherwise rewritten before their lengths are compared.
     assert default_display_name(
         "  1 Gang 1 Way Switch:1 Gang 1 Way Switch  ",
         "4 FOLD PUSH BUTTON, WHITE c/w FRAME",
-    ) == "1 Gang 1 Way Switch"
+    ) == "4 FOLD PUSH BUTTON, WHITE c/w FRAME"
+    assert default_display_name("Desk:Desk", "Long itemit asset") == "Desk:Desk"
+    assert default_display_name("  Desk:Desk  ", "A much longer itemit asset") == "  Desk:Desk  "
 
     # New provenance protects any explicitly edited label, even if it is
     # longer than either source name.
@@ -157,7 +159,7 @@ def test_display_name_selection_and_legacy_dataframe_fallback(tmp_path):
         legacy_auto,
         "1 Gang 1 Way Switch:1 Gang 1 Way Switch",
         "4 FOLD PUSH BUTTON, WHITE c/w FRAME",
-    ) == "1 Gang 1 Way Switch"
+    ) == "4 FOLD PUSH BUTTON, WHITE c/w FRAME"
     legacy_custom = {**legacy_auto, "updated_at": "2026-11-12T14:00:00+00:00"}
     assert resolved_display_name(
         legacy_custom,
@@ -170,10 +172,10 @@ def test_display_name_selection_and_legacy_dataframe_fallback(tmp_path):
     }
     switch_asset = {**asset(), "name": "4 FOLD PUSH BUTTON, WHITE c/w FRAME"}
     exported = service(tmp_path, [{**mapping(), **legacy_auto}], [switch_asset], switch_index)
-    assert exported.records()[0]["display_name"] == "1 Gang 1 Way Switch"
-    assert "1 Gang 1 Way Switch" in exported.csv()
+    assert exported.records()[0]["display_name"] == "4 FOLD PUSH BUTTON, WHITE c/w FRAME"
+    assert "4 FOLD PUSH BUTTON, WHITE c/w FRAME" in exported.csv()
 
     row = service(tmp_path, [mapping()], [asset()]).records()[0]
     assert row["display_name"] == "Desk"
     persisted = service(tmp_path, [{**mapping(), "display_name": "  Edited Desk  "}], [asset()]).records()[0]
-    assert persisted["display_name"] == "Edited Desk"
+    assert persisted["display_name"] == "  Edited Desk  "

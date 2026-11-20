@@ -377,8 +377,8 @@ def get_mapping_status(model_key: str, ifc_global_id: str):
 @app.patch("/mappings/display-name")
 def update_mapping_display_name(payload: DisplayNameUpdate):
     require_mapping_writes_enabled()
-    display_name = payload.display_name.strip()
-    if not display_name:
+    display_name = payload.display_name
+    if not display_name.strip():
         raise HTTPException(status_code=400, detail="display_name must not be blank")
     try:
         return enrich_display_name(mapping_store().update_display_name(

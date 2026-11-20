@@ -267,7 +267,7 @@ def test_confirmed_display_name_can_change_without_changing_identity(tmp_path, m
     updated = api.update_mapping_display_name(api.DisplayNameUpdate(
         model_key="foyer", ifc_global_id="2aBcD3", display_name="  Edited Asset  "
     ))
-    assert updated["display_name"] == "Edited Asset"
+    assert updated["display_name"] == "  Edited Asset  "
     assert updated["display_name_source"] == "CUSTOM"
     assert updated["model_key"] == created["model_key"]
     assert updated["ifc_global_id"] == created["ifc_global_id"]

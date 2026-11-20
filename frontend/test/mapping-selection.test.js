@@ -23,3 +23,11 @@ test('uses the Firestore display_name before falling back to the IFC index name'
   assert.equal(mappedIfcDisplayName({ display_name: 'Combined Firebase display name' }, indexedElement), 'Combined Firebase display name');
   assert.equal(mappedIfcDisplayName({ display_name: '   ' }, indexedElement), 'Local IFC index name');
 });
+
+test('restores the exact IFC source label after automatic display-name selection', () => {
+  const indexedElement = { name: '  Computer:Computer (Zone A)  ', globalId: 'global-id' };
+  assert.equal(
+    mappedIfcDisplayName({ display_name: 'Computer:Computer (Zone A)', display_name_source: 'AUTO' }, indexedElement),
+    '  Computer:Computer (Zone A)  ',
+  );
+});

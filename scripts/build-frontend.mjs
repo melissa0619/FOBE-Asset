@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const generatedPaths = [
-  'index.html', 'model-view.html', 'assets', 'css', 'js', 'images', 'fragments',
+  'index.html', 'asset-mapping.html', 'model-view.html', 'assets', 'css', 'js', 'images', 'fragments',
   'ifc-index', 'wasm', 'worker.mjs',
 ];
 const buildDirectory = resolve(root, '.frontend-build');
@@ -56,7 +56,7 @@ for (const path of generatedPaths) {
   await rm(resolve(root, path), { recursive: true, force: true });
 }
 
-for (const path of ['index.html', 'model-view.html', 'assets']) {
+for (const path of ['index.html', 'asset-mapping.html', 'assets']) {
   await copyIfPresent(resolve(buildDirectory, path), resolve(root, path));
 }
 
